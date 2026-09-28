@@ -1,0 +1,28 @@
+# Phone spike: private identity, session, and vendored upstream sources.
+flickos-phone-spike/phone-state/
+flickos-phone-spike/run-2026-09-27/
+flickos-phone-spike/kdeconnect-source/
+
+# Unpacked Debian packages fetched for the headless harness.
+flickos-headless-labwc/tools/debs/
+flickos-headless-labwc/tools/usr/
+
+# Created while following a guide.
+**/work/
+**/out/
+**/practice/
+**/debs/
+**/unpacked/
+**/shots/
+**/recordings/
+**/logs/
+**/fake-home/
+hello-checks.txt
+hello-only.txt
+hello-vm.png
+build-all.log
+vm-run.log
+
+__pycache__/
+*.pyc
+.DS_Store

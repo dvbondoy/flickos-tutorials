@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Spike path-nothere
+Tooltip=Spike path-nothere
+Profiles=p;
+TryExec=flickos-nothere
+
+[X-Action-Profile p]
+MimeTypes=all/all;
+
+Exec=notify-send "Spike path-nothere" %f

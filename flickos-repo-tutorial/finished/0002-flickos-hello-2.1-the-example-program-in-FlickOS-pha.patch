@@ -1,0 +1,1405 @@
+From 0bc1e0776e3ff07c64255ab7901b42f0fb617c89 Mon Sep 17 00:00:00 2001
+From: dvbondoy <dvbondoy@gmail.com>
+Date: Mon, 28 Sep 2026 09:16:14 +0800
+Subject: [PATCH 2/2] flickos-hello 2.1: the example program, in FlickOS (phase
+ 1)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- flickos-hello 2.1 (new here): the greeting, one setting with a system
+  default (/etc/xdg/flickos/hello.conf) and a user's choice
+  (~/.config/flickos/hello); greeting list|current|set ID|default, say,
+  and a window (show). Every change is now recorded for Settings →
+  History. 25 unit tests, all with faked config, state and /etc paths.
+- flickos-control 1.20: a Hello tile on More Settings while it is
+  installed (INT-4), with search keywords. History knows flickos-hello:
+  the label Greeting, the greetings' names from greeting list, undo with
+  greeting set OLD, and Put Back as It Was. 4 new tests.
+- flickos-desktop 1.22: Recommends flickos-hello. An app users may
+  remove, so not a Depends and not in REQUIRED; new installs only.
+- Boot test: change the greeting, undo it from History, open and close
+  the window (hello-dark.png). Tried in the 2.1 live ISO with both
+  packages from a local test repo.
+- Docs: 04, 01 (row and tree), 09 (a tile's app goes in the Settings
+  menu only when it is a settings app), CLAUDE.md, and the design doc,
+  accepted, with phase 1's measurements.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CLAUDE.md                                     |   3 +-
+ docs/01-overview.md                           |   2 +
+ docs/04-packages.md                           |  31 +-
+ docs/09-customizing.md                        |   9 +-
+ docs/design/flickos-hello.md                  |  31 +-
+ packages/flickos-control/debian/changelog     |   8 +
+ .../flickos-control/tests/test_control.py     |  41 ++
+ .../flickos-control/usr/bin/flickos-control   |  34 +-
+ packages/flickos-desktop/debian/changelog     |   6 +
+ packages/flickos-desktop/debian/control       |   6 +-
+ packages/flickos-hello/debian/changelog       |  21 +
+ packages/flickos-hello/debian/control         |  23 +
+ packages/flickos-hello/debian/copyright       |  22 +
+ packages/flickos-hello/debian/flickos-hello.1 |  51 +++
+ packages/flickos-hello/debian/install         |   3 +
+ packages/flickos-hello/debian/manpages        |   1 +
+ packages/flickos-hello/debian/rules           |  11 +
+ packages/flickos-hello/debian/source/format   |   1 +
+ .../flickos-hello/etc/xdg/flickos/hello.conf  |   6 +
+ packages/flickos-hello/tests/test_hello.py    | 265 +++++++++++
+ packages/flickos-hello/usr/bin/flickos-hello  | 427 ++++++++++++++++++
+ .../share/applications/flickos-hello.desktop  |  10 +
+ tools/boot-test.py                            |  14 +
+ 23 files changed, 1006 insertions(+), 20 deletions(-)
+ create mode 100644 packages/flickos-hello/debian/changelog
+ create mode 100644 packages/flickos-hello/debian/control
+ create mode 100644 packages/flickos-hello/debian/copyright
+ create mode 100644 packages/flickos-hello/debian/flickos-hello.1
+ create mode 100644 packages/flickos-hello/debian/install
+ create mode 100644 packages/flickos-hello/debian/manpages
+ create mode 100755 packages/flickos-hello/debian/rules
+ create mode 100644 packages/flickos-hello/debian/source/format
+ create mode 100644 packages/flickos-hello/etc/xdg/flickos/hello.conf
+ create mode 100644 packages/flickos-hello/tests/test_hello.py
+ create mode 100755 packages/flickos-hello/usr/bin/flickos-hello
+ create mode 100644 packages/flickos-hello/usr/share/applications/flickos-hello.desktop
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 9e79154..bdee71f 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -51,7 +51,8 @@ So customizations go into `.deb` packages under `packages/`, not into files drop
+   - `flickos-menu`: start menu (`usr/bin/flickos-menu`, single Python 3 file, GTK 3 gtk-layer-shell, CSS `usr/share/flickos/menu/style.css` in GTK theme colors only). Its kind follows the layout (`MenuStyle=` in `layout.ini`, second line of `menu/anchor`): `classic` Windows 7 (Redmond), `categories` GNOME 2/Whisker (Traditional), `grid` full-screen Launchpad (Cupertino), unless the user picked one for all layouts (`flickos-layout menu-style list|current|set layout|classic|categories|grid`, `MenuStyle=` in `layouts.conf`, default `layout`; *Start menu style* on the Settings page, active only while the apps button is the menu); one `View` subclass each (`VIEWS`, same names as `MENU_STYLES` in both packages), only the current one built; `set` sends a running daemon SIGWINCH so it builds the new layout's view while hidden. **On by default** since flickos-layouts 1.23 (`DEFAULT_LAUNCHER`, `Launcher=menu`; ADR-010, an exception recorded in HIG INT-9; fuzzel is `FALLBACK_LAUNCHER`, the only choice without flickos-menu); flickos-layouts owns the choice (`flickos-layout launcher list|current|set fuzzel|menu`, `Launcher=` in `layouts.conf`, *Apps button* on flickos-control's layout page, shown while flickos-menu is installed). While on for a layout with `Menu=` (corner), flickos-layout writes `$XDG_RUNTIME_DIR/flickos/menu/anchor`, adds `Super_L`/`Super_R` `onRelease` keybinds (`MENU_SUPER`) to the rc.xml overlay, uses `MENU_CLICK_ACTIONS` for desktop clicks, points the generated `custom/launcher` at it (`MENU_TOGGLE`), and runs `flickos-menu daemon` with the panel under `supervise` (`sync_menu` starts/stops it on `set`); while off none of that exists and nothing runs. The daemon keeps the window built and answers `pkill` signals (SIGUSR1 toggle, SIGUSR2 Super tap, SIGWINCH hide; GLib sources at default priority, a higher one deadlocks mapping the layer surface); without the anchor file `toggle` runs fuzzel and starts no daemon. A Super tap counts only if Super was alone and let go within `TAP_MS` (below flickos-shortcuts' `HOLD_MS`), timed through GDK's keymap state. Pins: first `flickos/menu.conf` in `XDG_CONFIG_DIRS` (flickos-installer's live one has Install FlickOS), then `~/.config/flickos/menu`. Design and measurements: `docs/design/flickos-menu.md`. Unit tests in `tests/`. A Depends of flickos-desktop and in `REQUIRED`.
+   - `flickos-welcome`: the window a new account sees at login on an installed system, until it ticks *Do not show on startup* (`flickos-welcome startup current|set on|off|default`) (`usr/bin/flickos-welcome`, single Python 3 file, GTK 3 via python3-gi, no CSS; *Welcome* in the apps menu via `flickos-welcome.desktop`). Cards (`CARDS`, hidden when their program is missing) run the program that owns the job: `flickos-layout pick`, `flickos-control`, `nm-connection-editor`, `flickos-shortcuts show`, `gpk-application`, and `xdg-open` for the addresses in the conffile `/etc/xdg/flickos/welcome.conf` (`[Links]`; a card whose address is empty is left out, and `DEFAULT_LINKS` keeps `donate` empty so a payment address is never baked into the program. **`Donate=` must stay the same address as the installer branding's `donateUrl`**; a unit test compares them). `Enabled=no` turns it off for the machine. It owns no settings. `first-run` (flickos-settings' autostart) opens it while the marker `~/.config/flickos/welcome` exists (from `/etc/skel`, lintian override; the check box deletes/writes it atomically, `boot=live` and `Enabled=no` delete it), and it also deletes flickos-layouts' `choose-layout` so the chooser it replaces can't open too; never with `boot=live`. autostart runs `flickos-welcome first-run` when installed and `flickos-layout first-run` only otherwise, so exactly one window opens. Unit tests in `tests/`. A Depends of flickos-desktop and in `REQUIRED`.
+   - `flickos-phone`: pages, files and text between an Android phone with the KDE Connect app and the computer (`usr/bin/flickos-phone`, single Python 3 file, stdlib only, no GTK except `send --choose`'s file chooser; design and phase 0 results with a real phone: `docs/design/flickos-phone.md`). Speaks only KDE Connect protocol 8's pairing, `kdeconnect.share.request`, `kdeconnect.clipboard`, `kdeconnect.ping`, plus `kdeconnect.battery` in (the button's tooltip) and `kdeconnect.findmyphone.request` out (`ring`) (`INCOMING`, `OUTGOING`). **Off by default** (`flickos-phone set enabled yes|no|default`, `[Phone]` in the conffile `/etc/xdg/flickos/phone.conf` then `~/.config/flickos/phone`; `record()` for History), never with `boot=live`; autostart runs `flickos-phone daemon`, which exits at once while off (`daemon.lock`, control socket `$XDG_RUNTIME_DIR/flickos/phone/control`, JSON lines). In KDE Connect the TCP connector is the TLS *server*, so the daemon never connects to a phone's main port (it broadcasts to UDP 1716 only while no phone is connected, since every broadcast makes a phone reconnect, and answers a phone's broadcast by UDP): it is always the TLS client with `CERT_NONE` and checks certificates itself (`cert_fields` parses the DER for CN and SPKI, `verification_key`); paired certificates pinned in `$XDG_DATA_HOME/flickos/phone/devices/`. Files sent to the phone: the daemon is TLS server with `CERT_REQUIRED` and only the pinned certificate, retried once. Listens only while the active NetworkManager connection is in `Networks` (pairing adds it; `nmcli monitor`) or while `flickos-phone pair` runs; pair requests are refused otherwise. `state` (one JSON object for *Settings → Phone*), `pair --json` (its *Add Phone…*), `set networks 'UUID …'|default`. Panel button `custom/phone` (defined in flickos-layouts' `common/modules.jsonc`; `use_phone()` puts it before `custom/tiler` in the generated panel only while `phone_on()`, i.e. `flickos-phone get enabled` is yes and not live; `set enabled` runs `flickos-layout reload-panel`): `status --panel` JSON (dimmed class `waiting`), the daemon sends `SIGRTMIN+PANEL_SIGNAL` (9; tiler's is 8) on phone connect/disconnect, click = `flickos-phone menu` (fuzzel: *Send Files to Phone…* = `send --choose`, GTK's file chooser imported only there; *Send Text to Phone…* = `send --type-text`, one line in fuzzel `--prompt-only`; *Send Clipboard to Phone*, where `send --clipboard` sends a web address as a page; *Send Screenshot to Phone* = `send --screenshot`, grim into the runtime folder, deleted after, only while grim is installed; *Ring My Phone* = `ring`; the newest `MENU_RECEIVED` items; *Phone Settings* = `flickos-control --page phone`), tooltip with the phone's battery (`battery_text`). *Send to Phone* in PCManFM: `usr/share/file-manager/actions/flickos-phone-send.desktop` (`send --notify %F`, the result as a notification); libfm ignores `ShowIfTrue`/`ShowIfRunning` and honours only `TryExec` (searched on `PATH`), so the daemon keeps the link `$XDG_RUNTIME_DIR/flickos/bin/flickos-phone-on` (`ON_LINK`) while it runs and flickos-session puts that folder last on `PATH`; actions need `libfm-modules` (a Depends, dropped from the image as libfm's Recommends). Received items: notification whose click (mako shows no buttons) opens a page/openable file or copies text, `received.jsonl` (last `RECEIVED_ITEMS`, `RECEIVED_DAYS`), files into Downloads (cleaned name, never overwritten, never executable). ufw drops incoming by default: phones need TCP 1716 and 1739–1764. Unit tests with a fake phone on 127.0.0.1 in `tests/`. A Depends of flickos-desktop and in `REQUIRED`.
+-  - `flickos-control`: the Settings window (`usr/bin/flickos-control`, single Python 3 file, GTK 3 via python3-gi, no CSS; *Settings → All Settings*). Owns the mouse, touchpad and keyboard settings (`SETTINGS`; `flickos-control get|set KEY VALUE|prepare`; `~/.config/flickos/input`, `keyboard`, system defaults in the conffiles `/etc/xdg/flickos/input.conf`, `keyboard.conf`): `set` writes `$XDG_RUNTIME_DIR/flickos/control/labwc.xml` (`<libinput>` categories touchpad/non-touch, `<keyboard>` options) and `control/environment` (all four `XKB_DEFAULT_*`), then runs `flickos-layout reconfigure`; flickos-session runs `flickos-control prepare` before `flickos-layout prepare`. labwc never resets an option that disappears, so a set value stays written and `set KEY default` stores the default. Only keys labwc 0.8.3 parses (tests hold the list). The system layout (`/etc/default/keyboard`; Debian's localed is read-only) goes through `pkexec /usr/libexec/flickos/control-helper keyboard …` (polkit `org.flickos.control.policy`, one action per verb via `exec.argv1`). Locking is `flickos-control lock` (swaylock `SWAYLOCK` plus, with `lock.background` `wallpaper`, the images the user's swaybg shows, per output); swayidle runs it, and flickos-settings' `/usr/libexec/flickos/lock` (Super+L, both menus, flickos-menu; plain swaylock without flickos-control); `idle.lock-before-sleep`. Also owns the idle times (`idle.*`, `~/.config/flickos/idle`, `/etc/xdg/flickos/idle.conf`): autostart runs `flickos-control idle` (execs swayidle with `FLICKOS_IDLE=1`, which also locks on logind's `lock`; never with `boot=live`), and a change restarts only that swayidle. *Power & Idle* also has the power button and lid (logind's `Handle*` read with `busctl`; the helper's `power SETTING ACTION` writes `/etc/systemd/logind.conf.d/60-flickos.conf` and reloads logind; lid rows only with `SW_LID`). Language and formats (`locale.language`, `locale.formats`, `~/.config/flickos/locale`, generated locales only) become `LANG`, `LANGUAGE=`, `LC_MESSAGES` and `FORMAT_VARS` lines in `control/environment`; *Language & Region* sets the system's with `localectl set-locale` (trixie's localed can) and generates a missing locale through the helper's `locale-add` (`/etc/locale.gen`, `locale-gen --keep-existing`). Night light (`night-light.enabled`, default on, `night-light.temperature` = wlsunset `-t`; on *Displays*): autostart runs `flickos-control night-light` (execs flickos-settings' `night-light` script, which passes options to wlsunset, with `FLICKOS_NIGHT_LIGHT=1`; nothing while off), a change restarts only FlickOS's wlsunset. Do Not Disturb (`notifications.do-not-disturb`, *Notifications* page) is mako's `do-not-disturb` mode from flickos-settings' mako config (critical still shown); `makoctl` runs only while the user's mako owns `org.freedesktop.Notifications` (mako's D-Bus activation would start a plain mako), and autostart's `flickos-control notifications` re-adds the mode after login when on. Startup applications (*Startup Applications*, `flickos-control startup list|enable|disable|add|remove|run`): XDG autostart by the spec (user folder first, `Hidden`, `OnlyShowIn`, `TryExec`, `Exec` field codes, `X-GNOME-Autostart-enabled=false` = off, a system entry changed through a user copy); autostart runs `startup run` last (waits ≤10 s for the tray); flickos-settings' `/etc/xdg/flickos/autostart` hides the entries of what its autostart starts itself and keeps the print applet off, so nothing new starts by default. Automatic updates (*Updates*, installed only; `flickos-control updates` prints them) are read from `apt-config dump`; the helper's `updates auto|scope|reboot VALUE` writes `/etc/apt/apt.conf.d/60flickos-updates` (`#clear`s the origins; scopes `UPDATE_SCOPES` in both files). flickos-settings Breaks flickos-control (<< 1.10). *Displays* keeps screen arrangements: `flickos-control displays list|save|forget|start` writes one kanshi profile per set of connected screens (`wlr-randr --json`) into `~/.config/flickos/displays`; autostart's `displays start` execs kanshi with `FLICKOS_DISPLAYS=1` only while one is kept and no other kanshi runs, and `save`/`forget` SIGHUP, start or stop it (Depends kanshi, wlr-randr). *Default Applications* runs `flickos-control default-app set` (`xdg-mime default`, or `~/.config/xdg-terminals.list` for the terminal); Super+Enter/the menu run `xdg-terminal-exec` (FlickOS default foot in flickos-settings' `/etc/xdg/flickos/xdg-terminals.list`), Super+B/Super+E/the menu run flickos-settings' `/usr/libexec/flickos/open-default browser|files`. *Date & Time* runs `timedatectl` (flickos-desktop depends on `systemd-timesyncd`; systemd only recommends it). *Login* (installed systems with flickos-greeter's `autologin` group only) runs the helper's `autologin-on`/`autologin-off`, for the calling user only (`PKEXEC_UID`). *Users* (installed systems only) runs its `user-add NAME FULLNAME yes|no`, `user-remove NAME keep|delete`, `user-admin NAME yes|no`, `user-password NAME` (passwords on stdin; adduser/chpasswd/userdel/gpasswd; administrators = group `sudo`; new accounts get the installer's `defaultGroups`, `DEFAULT_GROUPS`; never the caller's account, a logged-in one or the last administrator). *Firewall* (while `/etc/ufw/ufw.conf` exists; ufw is only a Recommends of flickos-desktop) reads its `ENABLED=` (world-readable; `ufw status` needs root) and runs the helper's `firewall-on`/`firewall-off` (`ufw --force enable`/`ufw disable`); rules stay `sudo ufw`. *Phone* (Devices group; while flickos-phone is installed, not with `boot=live`) owns no settings: it reads one `flickos-phone state` (again every `PHONE_REFRESH_SECONDS` while mapped, the timer stops when it isn't), runs `flickos-phone set|forget|network`, and *Add Phone…* talks to `flickos-phone pair --json` (events on stdout, yes/no on stdin; Cancel before a request kills it, which closes the daemon's pair window). Its firewall row is the system setting `firewall.phones`: the helper's `firewall-phones on|off` writes the ufw app profile `PHONES_PROFILE` (TCP 1716, 1739:1764) and allows it from `PRIVATE_NETWORKS` only, deleting both for off; the profile (first line `PHONES_MARK`, same in both files, a test checks) is the readable state. flickos-phone's `enabled`, `name`, `networks` are in `PHONE_HISTORY_KEYS` (undo = `flickos-phone set KEY OLD`), `device.ID` is shown only. *Memory* (`docs/design/flickos-memory.md`; so far its *This computer* section) shows memory and in use from `/proc/meminfo` and the system setting `firefox.memory`: the helper's `firefox-memory on|off` writes/deletes `/etc/firefox-esr/flickos-memory.js` (`FIREFOX_MEMORY_PREFS`, `pref()` defaults that a user's own values beat; Debian's firefox-esr reads `/etc/firefox-esr/*.js` through its `browser/defaults/syspref` link, and the row is hidden without it), applied at Firefox's next start (`docs/design/flickos-firefox.md`); *Recommended for this computer* when `old_computer()` finds ≤ `OLD_MEMORY_KB` or no accelerated render node (`SOFTWARE_DRIVERS`, virtio without virgl). *History* (`flickos-control history [--days N] [--json]|undo ID|clear`; `docs/design/flickos-history.md`): every owner (this one's `save_values`, flickos-layout's `apply_choice`, flick-tiler's `save_choice`) appends a change that shows to `$XDG_STATE_HOME/flickos/history.jsonl` (0600, `HISTORY_BYTES` then the older half dropped) with its own `record()` in one shared format (`v`, `id` = time_ns, `time`, `owner`, `key`, `old`, `new`; `default` = the user had no value); a failure is only a warning. `shape_history` merges one setting's entries within `MERGE_SECONDS`, drops no-ops, keeps `HISTORY_DAYS`; the page shows `HISTORY_ROWS`. Undo (`undo_commands`) runs the owner's command with the old value (every owner's `set` takes `default`), never a stored command, only for a setting's newest change and while `current_value` still matches. `history.enabled` (on by default under HIG INT-9's exception for records; conffile `history.conf`, also read by the other owners) turns it off and deletes the file (`history clear` also writes `history.cleared`, before which apt's changes are left out). System settings go through `flickos-control system KEY [VALUE]` (`SYSTEM_LABELS`: power button/lid, firewall, `firefox.memory`, autologin, updates, timezone, ntp, `keyboard.system`), which the pages run and which records after success; default apps through `default-app list|set CATEGORY APP`; `startup …` records `startup.ID`; the Users and Language pages record `user.NAME`/`language.LOCALE` (display only, except administrator on/off). Software changes: the helper reads apt's log (`packages-list [DAYS]`, `packages-plan ID`: read-only verbs, `READ_ONLY`, no root, no polkit action) and leaves out the installation (up to the transaction that removes `flickos-installer`/`calamares`, plus `INSTALL_SECONDS`; in the live session everything before boot); `pkexec control-helper packages-undo ID` (ID = `Start-Date` as `YYYY-MM-DDTHH:MM:SS`) re-reads it as root, simulates with `apt-get -s` (asked-for packages plus the ones they brought in, named, never `--autoremove`; falls back to the asked-for ones), refuses extra removals, anything in flickos-desktop's Depends and `LIVE_PACKAGES`, and runs apt-get with `-o FlickOS::Undo=ID`. The page shows the plan before the password. `history restore WHEN [--dry-run]` (WHEN: a change id = just before it, a date = its end, or a date and time; *Put Back as It Was…* on the page, per day) gives every setting changed since WHEN its value then (`restore_plan`: `restorable()` = no password: own settings, layout, tiler, default and startup apps; not system settings, software, users), runs `restore_commands` (flickos-layout last, in one `set … --style …`), then records `restore` (old = when it started, new = WHEN); `shape_history` shows the changes between those as that one row, whose Undo is `history restore OLD`. Moments compare by `id` (ns). Add a `HISTORY_LABELS` entry (and `can_undo`/`undo_commands` for a new owner, `SYSTEM_LABELS`/`check_system`/`system_value`/`system_command` for a new system setting) when adding a setting. Pages whose class has `available()` false are left out. *About* (`system_info()`; `flickos-control about` prints it plus FlickOS's package versions, for bug reports) copies with `wl-copy`. The sidebar groups the pages under headings (`Page.group`; `PAGES`/`PAGE_CLASSES` in sidebar order, a group's pages together: Desktop layout, tiling, notifications; Devices displays, input, keyboard, shortcuts, idle; Apps apps, startup; System region, datetime, memory, updates; Accounts and security users, login, firewall; then history, more, about with no heading) in a `GtkListBox` (`page_list()`; `GtkStackSidebar` has no headings). Other pages own no settings: they run the owning command (`flickos-layout`, `flick-tiler`, `flickos-shortcuts`); constructors only build widgets, and `shown()` reads through `Ui.background()` (a thread, newest answer per key wins, spinner until then) so the window opens at once; the layout page reads everything with one `flickos-layout state` (JSON, flickos-layouts >= 1.19); changes run with `run_async`; a missing capability goes into the owner (hence `flick-tiler floating list|add|remove`, `gap N`, and `ratio`/`gap` in its status, flick-tiler >= 1.3). *More Settings* tiles (`TILES`, same apps as the Settings menu) are hidden when the app is missing. Search box above the pages: `Ui.row()`/`Ui.heading()` index what pages build while the window opens (`ui.indexing`), plus pages, tiles and `SEARCH_KEYWORDS` (one entry per page and tile, a test checks); `find` folds case and accents; a result scrolls to the row and focuses its control, or starts the tile's app. Add keywords when adding a page or tile. One window per session (`control.lock`). Design, ADRs and the phase plan (input, keyboard layout, idle, login next): `docs/design/flickos-control.md`. Unit tests in `tests/`. A Depends of flickos-desktop and in `REQUIRED`.
++  - `flickos-control`: the Settings window (`usr/bin/flickos-control`, single Python 3 file, GTK 3 via python3-gi, no CSS; *Settings → All Settings*). Owns the mouse, touchpad and keyboard settings (`SETTINGS`; `flickos-control get|set KEY VALUE|prepare`; `~/.config/flickos/input`, `keyboard`, system defaults in the conffiles `/etc/xdg/flickos/input.conf`, `keyboard.conf`): `set` writes `$XDG_RUNTIME_DIR/flickos/control/labwc.xml` (`<libinput>` categories touchpad/non-touch, `<keyboard>` options) and `control/environment` (all four `XKB_DEFAULT_*`), then runs `flickos-layout reconfigure`; flickos-session runs `flickos-control prepare` before `flickos-layout prepare`. labwc never resets an option that disappears, so a set value stays written and `set KEY default` stores the default. Only keys labwc 0.8.3 parses (tests hold the list). The system layout (`/etc/default/keyboard`; Debian's localed is read-only) goes through `pkexec /usr/libexec/flickos/control-helper keyboard …` (polkit `org.flickos.control.policy`, one action per verb via `exec.argv1`). Locking is `flickos-control lock` (swaylock `SWAYLOCK` plus, with `lock.background` `wallpaper`, the images the user's swaybg shows, per output); swayidle runs it, and flickos-settings' `/usr/libexec/flickos/lock` (Super+L, both menus, flickos-menu; plain swaylock without flickos-control); `idle.lock-before-sleep`. Also owns the idle times (`idle.*`, `~/.config/flickos/idle`, `/etc/xdg/flickos/idle.conf`): autostart runs `flickos-control idle` (execs swayidle with `FLICKOS_IDLE=1`, which also locks on logind's `lock`; never with `boot=live`), and a change restarts only that swayidle. *Power & Idle* also has the power button and lid (logind's `Handle*` read with `busctl`; the helper's `power SETTING ACTION` writes `/etc/systemd/logind.conf.d/60-flickos.conf` and reloads logind; lid rows only with `SW_LID`). Language and formats (`locale.language`, `locale.formats`, `~/.config/flickos/locale`, generated locales only) become `LANG`, `LANGUAGE=`, `LC_MESSAGES` and `FORMAT_VARS` lines in `control/environment`; *Language & Region* sets the system's with `localectl set-locale` (trixie's localed can) and generates a missing locale through the helper's `locale-add` (`/etc/locale.gen`, `locale-gen --keep-existing`). Night light (`night-light.enabled`, default on, `night-light.temperature` = wlsunset `-t`; on *Displays*): autostart runs `flickos-control night-light` (execs flickos-settings' `night-light` script, which passes options to wlsunset, with `FLICKOS_NIGHT_LIGHT=1`; nothing while off), a change restarts only FlickOS's wlsunset. Do Not Disturb (`notifications.do-not-disturb`, *Notifications* page) is mako's `do-not-disturb` mode from flickos-settings' mako config (critical still shown); `makoctl` runs only while the user's mako owns `org.freedesktop.Notifications` (mako's D-Bus activation would start a plain mako), and autostart's `flickos-control notifications` re-adds the mode after login when on. Startup applications (*Startup Applications*, `flickos-control startup list|enable|disable|add|remove|run`): XDG autostart by the spec (user folder first, `Hidden`, `OnlyShowIn`, `TryExec`, `Exec` field codes, `X-GNOME-Autostart-enabled=false` = off, a system entry changed through a user copy); autostart runs `startup run` last (waits ≤10 s for the tray); flickos-settings' `/etc/xdg/flickos/autostart` hides the entries of what its autostart starts itself and keeps the print applet off, so nothing new starts by default. Automatic updates (*Updates*, installed only; `flickos-control updates` prints them) are read from `apt-config dump`; the helper's `updates auto|scope|reboot VALUE` writes `/etc/apt/apt.conf.d/60flickos-updates` (`#clear`s the origins; scopes `UPDATE_SCOPES` in both files). flickos-settings Breaks flickos-control (<< 1.10). *Displays* keeps screen arrangements: `flickos-control displays list|save|forget|start` writes one kanshi profile per set of connected screens (`wlr-randr --json`) into `~/.config/flickos/displays`; autostart's `displays start` execs kanshi with `FLICKOS_DISPLAYS=1` only while one is kept and no other kanshi runs, and `save`/`forget` SIGHUP, start or stop it (Depends kanshi, wlr-randr). *Default Applications* runs `flickos-control default-app set` (`xdg-mime default`, or `~/.config/xdg-terminals.list` for the terminal); Super+Enter/the menu run `xdg-terminal-exec` (FlickOS default foot in flickos-settings' `/etc/xdg/flickos/xdg-terminals.list`), Super+B/Super+E/the menu run flickos-settings' `/usr/libexec/flickos/open-default browser|files`. *Date & Time* runs `timedatectl` (flickos-desktop depends on `systemd-timesyncd`; systemd only recommends it). *Login* (installed systems with flickos-greeter's `autologin` group only) runs the helper's `autologin-on`/`autologin-off`, for the calling user only (`PKEXEC_UID`). *Users* (installed systems only) runs its `user-add NAME FULLNAME yes|no`, `user-remove NAME keep|delete`, `user-admin NAME yes|no`, `user-password NAME` (passwords on stdin; adduser/chpasswd/userdel/gpasswd; administrators = group `sudo`; new accounts get the installer's `defaultGroups`, `DEFAULT_GROUPS`; never the caller's account, a logged-in one or the last administrator). *Firewall* (while `/etc/ufw/ufw.conf` exists; ufw is only a Recommends of flickos-desktop) reads its `ENABLED=` (world-readable; `ufw status` needs root) and runs the helper's `firewall-on`/`firewall-off` (`ufw --force enable`/`ufw disable`); rules stay `sudo ufw`. *Phone* (Devices group; while flickos-phone is installed, not with `boot=live`) owns no settings: it reads one `flickos-phone state` (again every `PHONE_REFRESH_SECONDS` while mapped, the timer stops when it isn't), runs `flickos-phone set|forget|network`, and *Add Phone…* talks to `flickos-phone pair --json` (events on stdout, yes/no on stdin; Cancel before a request kills it, which closes the daemon's pair window). Its firewall row is the system setting `firewall.phones`: the helper's `firewall-phones on|off` writes the ufw app profile `PHONES_PROFILE` (TCP 1716, 1739:1764) and allows it from `PRIVATE_NETWORKS` only, deleting both for off; the profile (first line `PHONES_MARK`, same in both files, a test checks) is the readable state. flickos-phone's `enabled`, `name`, `networks` are in `PHONE_HISTORY_KEYS` (undo = `flickos-phone set KEY OLD`), `device.ID` is shown only. *Memory* (`docs/design/flickos-memory.md`; so far its *This computer* section) shows memory and in use from `/proc/meminfo` and the system setting `firefox.memory`: the helper's `firefox-memory on|off` writes/deletes `/etc/firefox-esr/flickos-memory.js` (`FIREFOX_MEMORY_PREFS`, `pref()` defaults that a user's own values beat; Debian's firefox-esr reads `/etc/firefox-esr/*.js` through its `browser/defaults/syspref` link, and the row is hidden without it), applied at Firefox's next start (`docs/design/flickos-firefox.md`); *Recommended for this computer* when `old_computer()` finds ≤ `OLD_MEMORY_KB` or no accelerated render node (`SOFTWARE_DRIVERS`, virtio without virgl). *History* (`flickos-control history [--days N] [--json]|undo ID|clear`; `docs/design/flickos-history.md`): every owner (this one's `save_values`, flickos-layout's `apply_choice`, flick-tiler's `save_choice`, flickos-hello's `save_greeting`) appends a change that shows to `$XDG_STATE_HOME/flickos/history.jsonl` (0600, `HISTORY_BYTES` then the older half dropped) with its own `record()` in one shared format (`v`, `id` = time_ns, `time`, `owner`, `key`, `old`, `new`; `default` = the user had no value); a failure is only a warning. `shape_history` merges one setting's entries within `MERGE_SECONDS`, drops no-ops, keeps `HISTORY_DAYS`; the page shows `HISTORY_ROWS`. Undo (`undo_commands`) runs the owner's command with the old value (every owner's `set` takes `default`), never a stored command, only for a setting's newest change and while `current_value` still matches. `history.enabled` (on by default under HIG INT-9's exception for records; conffile `history.conf`, also read by the other owners) turns it off and deletes the file (`history clear` also writes `history.cleared`, before which apt's changes are left out). System settings go through `flickos-control system KEY [VALUE]` (`SYSTEM_LABELS`: power button/lid, firewall, `firefox.memory`, autologin, updates, timezone, ntp, `keyboard.system`), which the pages run and which records after success; default apps through `default-app list|set CATEGORY APP`; `startup …` records `startup.ID`; the Users and Language pages record `user.NAME`/`language.LOCALE` (display only, except administrator on/off). Software changes: the helper reads apt's log (`packages-list [DAYS]`, `packages-plan ID`: read-only verbs, `READ_ONLY`, no root, no polkit action) and leaves out the installation (up to the transaction that removes `flickos-installer`/`calamares`, plus `INSTALL_SECONDS`; in the live session everything before boot); `pkexec control-helper packages-undo ID` (ID = `Start-Date` as `YYYY-MM-DDTHH:MM:SS`) re-reads it as root, simulates with `apt-get -s` (asked-for packages plus the ones they brought in, named, never `--autoremove`; falls back to the asked-for ones), refuses extra removals, anything in flickos-desktop's Depends and `LIVE_PACKAGES`, and runs apt-get with `-o FlickOS::Undo=ID`. The page shows the plan before the password. `history restore WHEN [--dry-run]` (WHEN: a change id = just before it, a date = its end, or a date and time; *Put Back as It Was…* on the page, per day) gives every setting changed since WHEN its value then (`restore_plan`: `restorable()` = no password: own settings, layout, tiler, default and startup apps; not system settings, software, users), runs `restore_commands` (flickos-layout last, in one `set … --style …`), then records `restore` (old = when it started, new = WHEN); `shape_history` shows the changes between those as that one row, whose Undo is `history restore OLD`. Moments compare by `id` (ns). Add a `HISTORY_LABELS` entry (and `can_undo`/`undo_commands` for a new owner, `SYSTEM_LABELS`/`check_system`/`system_value`/`system_command` for a new system setting) when adding a setting. Pages whose class has `available()` false are left out. *About* (`system_info()`; `flickos-control about` prints it plus FlickOS's package versions, for bug reports) copies with `wl-copy`. The sidebar groups the pages under headings (`Page.group`; `PAGES`/`PAGE_CLASSES` in sidebar order, a group's pages together: Desktop layout, tiling, notifications; Devices displays, input, keyboard, shortcuts, idle; Apps apps, startup; System region, datetime, memory, updates; Accounts and security users, login, firewall; then history, more, about with no heading) in a `GtkListBox` (`page_list()`; `GtkStackSidebar` has no headings). Other pages own no settings: they run the owning command (`flickos-layout`, `flick-tiler`, `flickos-shortcuts`); constructors only build widgets, and `shown()` reads through `Ui.background()` (a thread, newest answer per key wins, spinner until then) so the window opens at once; the layout page reads everything with one `flickos-layout state` (JSON, flickos-layouts >= 1.19); changes run with `run_async`; a missing capability goes into the owner (hence `flick-tiler floating list|add|remove`, `gap N`, and `ratio`/`gap` in its status, flick-tiler >= 1.3). *More Settings* tiles (`TILES`, same apps as the Settings menu, plus Hello, which owns a setting in its own window) are hidden when the app is missing. Search box above the pages: `Ui.row()`/`Ui.heading()` index what pages build while the window opens (`ui.indexing`), plus pages, tiles and `SEARCH_KEYWORDS` (one entry per page and tile, a test checks); `find` folds case and accents; a result scrolls to the row and focuses its control, or starts the tile's app. Add keywords when adding a page or tile. One window per session (`control.lock`). Design, ADRs and the phase plan (input, keyboard layout, idle, login next): `docs/design/flickos-control.md`. Unit tests in `tests/`. A Depends of flickos-desktop and in `REQUIRED`.
++  - `flickos-hello`: the example program (`usr/bin/flickos-hello`, single Python 3 file, GTK 3 via python3-gi only for `show`; design: `docs/design/flickos-hello.md`). Owns the greeting (`GREETINGS`, `flickos-hello greeting list|current|set ID|default`; conffile `/etc/xdg/flickos/hello.conf` `[Hello] Greeting=`, then `~/.config/flickos/hello`; 1.x's texts still read). `say [NAME]` prints it; `show` is a window with the greeting and a list, one per session (`hello.lock`). `record()` for History (`HELLO` in flickos-control, undo = `greeting set OLD`); a *More Settings* tile in flickos-control (INT-4), not in the Settings menu. A **Recommends** of flickos-desktop (an app users may remove; new installs only), not in `REQUIRED`. Unit tests in `tests/`.
+   - `waypaper`: upstream waypaper (GPL-3+, not in trixie) installed as is, version `X.Y+flickosN`, plus FlickOS defaults in `/etc/xdg/waypaper/config.ini` (read by a patched `config.py`). A Depends of flickos-desktop.
+   - `sfwbar`: upstream sfwbar (GPL-3, a GTK 3 layer-shell panel/dock; Debian dropped it), vendored at a git commit after 1.0_beta17 (beta17 lacks taskbar `pins` and breaks `size = "auto"`), version `1.0~betaN+gitYYYYMMDD+flickosN`. The only compiled package: `Architecture: any`, meson via `debian/rules` with optional features set explicitly, no -dbgsym. FlickOS patches (`FlickOS:` comments, listed in `debian/README.source`): the `running` CSS class on an app's dock button, and the bar property `sensor_maximized` (hide only while the focused window is maximized/fullscreen on the bar's output; needs window state changes to call `wintree_commit`). The Cupertino layout's dock (`sensor`, `sensor_maximized`, `exclusive_zone = "0"`) and Traditional's bottom panel (taskbar in an `hscroll` grid so it never pushes the pager off; pager of labwc's ext-workspace desktops, `workspace_mod_state` FlickOS fix so the current one is `focused`); a Depends of flickos-layouts.
+ - `--apt-recommends false` applies to **every** package in the image. `0050-flickos-recommends` installs only flickos-desktop's Recommends. Any other needed recommended package must be listed in `config/package-lists/`. A missing one can break boot silently (e.g. `user-setup` → no live user). Add must-haves to `REQUIRED` in `config/hooks/normal/0010-sanity.hook.chroot`. The `00recommends` apt config also stays on installed systems, so a new *Recommends* never reaches existing installs; use Depends for that.
+diff --git a/docs/01-overview.md b/docs/01-overview.md
+index 5c83268..e9e4489 100644
+--- a/docs/01-overview.md
++++ b/docs/01-overview.md
+@@ -83,6 +83,7 @@ flickos/
+ │   ├── flickos-shortcuts/        Keyboard shortcut sheet while Super is held (daemon + GTK sheet)
+ │   ├── flickos-control/          The Settings window (pages over flickos-layout, flick-tiler, flickos-shortcuts)
+ │   ├── flickos-greeter/          Login screen of installed systems (greetd + gtkgreet)
++│   ├── flickos-hello/            The example program: a greeting to choose (setting, window, History, tests)
+ │   ├── waypaper/                 Wallpaper picker (upstream waypaper, not in Debian trixie)
+ │   ├── sfwbar/                   Cupertino's dock, Traditional's window list and desktops (upstream sfwbar, compiled; not in Debian trixie)
+ │   ├── flickos-installer/        Calamares config + branding, live-session menu
+@@ -181,6 +182,7 @@ starts the same session.
+ | Change the Desktop Layout & Style chooser or its previews | `packages/flickos-layouts/usr/bin/flickos-layout` (`pick`), `tools/make-layout-previews.sh` | [09](09-customizing.md#the-chooser) |
+ | Change the welcome window, or stop it at a new account's logins | `packages/flickos-welcome/` (`CARDS`, `etc/xdg/flickos/welcome.conf`, `etc/skel/.config/flickos/welcome`); the chooser on its own is flickos-layouts' `choose-layout` and `flickos-layout first-run` | [09](09-customizing.md#first-login) |
+ | Change the phone connection (what a phone may send, notifications, ports, on for everyone, Send to Phone in the file manager) | `packages/flickos-phone/` (`CAPABILITIES`, `on_share`, `menu_entries`, `etc/xdg/flickos/phone.conf`, `usr/share/file-manager/actions/`), its panel button in `packages/flickos-layouts/` (`custom/phone` in `common/modules.jsonc` and `base.css`, `use_phone`), its autostart line in `packages/flickos-settings/usr/libexec/flickos/autostart`, the *Phone* page in `packages/flickos-control/` (`PhonePage`) | [design](design/flickos-phone.md) |
++| Change the example program Hello (greetings, the default greeting for everyone) | `packages/flickos-hello/` (`GREETINGS`, `etc/xdg/flickos/hello.conf`), its tile and History entry in `packages/flickos-control/` (`TILES`, `HELLO`) | [design](design/flickos-hello.md) |
+ | Change installer branding or behavior | `packages/flickos-installer/` | [09](09-customizing.md#installer) |
+ | Add a package only to the live ISO (not installed systems) | `config/package-lists/live.list.chroot` | [03](03-live-build-config.md) |
+ | Enable a systemd service in the image | `config/hooks/normal/0100-services.hook.chroot` | [03](03-live-build-config.md) |
+diff --git a/docs/04-packages.md b/docs/04-packages.md
+index 3ece986..09d3c50 100644
+--- a/docs/04-packages.md
++++ b/docs/04-packages.md
+@@ -442,8 +442,8 @@ it follows the Dark or Light style. Design and decisions:
+   flickos-phone only),
+   *History* (recent changes with *Undo*; see below) and
+   *More Settings* (tiles that start Wallpaper, Appearance, Displays, Network,
+-  Sound, Bluetooth, Printers and Software Updates; a tile is hidden when its app
+-  isn't installed) and *About* (FlickOS version from `/usr/lib/flickos-release`,
++  Sound, Bluetooth, Printers, Software Updates and Hello; a tile is hidden when
++  its app isn't installed) and *About* (FlickOS version from `/usr/lib/flickos-release`,
+   Debian, Linux, computer, processor, memory, graphics via `lspci`, disk,
+   desktop; *Copy System Info* puts the same text plus the FlickOS packages'
+   versions on the clipboard with `wl-copy`, and *Report a Problem* opens the
+@@ -643,6 +643,33 @@ it follows the Dark or Light style. Design and decisions:
+   screen arrangement (kanshi started and stopped), and records a clock change
+   and undoes it through `history`.
+ 
++### `flickos-hello`
++
++The example program: it says hello with the greeting the user chooses, and
++shows every part of a FlickOS program in about 430 lines (a setting with a
++system default and a user choice, the command line, a window, History, tests,
++a desktop file). Design: [flickos-hello](design/flickos-hello.md). One Python 3
++file, `usr/bin/flickos-hello`, GTK 3 through python3-gi for the window only.
++
++- **The setting:** the greeting, one of `GREETINGS` (id, text).
++  `flickos-hello greeting list|current|set ID|default`; the default for every
++  account in the conffile `/etc/xdg/flickos/hello.conf` (`[Hello]
++  Greeting=`), a user's choice in `~/.config/flickos/hello`. A broken file or
++  an unknown greeting is a warning, never an error. 1.x's texts (`Hello`)
++  are still understood.
++- **The window** (`flickos-hello show`, *Hello* in the app list and on
++  *Settings → More Settings*): the greeting and a list to change it, applied
++  at once. One per session (`$XDG_RUNTIME_DIR/flickos/hello.lock`).
++- **History:** every change is recorded (`record()`) and shown in *Settings →
++  History*, which undoes it with `greeting set OLD`.
++- **A Recommends of `flickos-desktop`:** an app users may remove. It is in
++  new installs only; installed systems get it with `sudo apt install
++  flickos-hello`.
++- **Unit tests** in `tests/` (reading the files, the commands, History, one
++  window, no GTK for the commands, the shipped files), run at package build.
++  The boot test changes the greeting, undoes it from History and opens the
++  window (`boot-test/hello-dark.png`).
++
+ ### `flickos-greeter`
+ 
+ The login screen of installed systems: greetd runs gtkgreet in the cage kiosk
+diff --git a/docs/09-customizing.md b/docs/09-customizing.md
+index 6594eb2..080af3e 100644
+--- a/docs/09-customizing.md
++++ b/docs/09-customizing.md
+@@ -1190,12 +1190,15 @@ agree. Mouse, touchpad and keyboard settings are flickos-control's own.
+ | About | `flickos-control about` (also `lspci`, `dpkg-query`); *Copy System Info*: `wl-copy` |
+ | Tiling | `flick-tiler status/modes/on/off/mode/ratio/gap/floating` |
+ | Keyboard Shortcuts | `flickos-shortcuts list`, `show` |
+-| More Settings | the apps in `TILES` (the same as the Settings menu) |
++| More Settings | the apps in `TILES` (the same as the Settings menu, plus Hello) |
+ 
+ - **Add a tile for another settings app:** a line in `TILES` in
+   `usr/bin/flickos-control` (id, name, icon names, command). Tiles of apps that
+-  aren't installed are hidden, so a Recommends is enough. Add the app to the
+-  Settings menu too (both files, see [Menu entries](#menu-entries)).
++  aren't installed are hidden, so a Recommends is enough. Add a settings app
++  to the Settings menu too (both files, see [Menu entries](#menu-entries)). An
++  app that only has a setting of its own in its window (Hello) gets a tile
++  for INT-4 but stays out of the Settings menu, which lists the system's
++  settings.
+ - **Change the mouse, touchpad, keyboard or idle defaults for everyone:**
+   uncomment lines in `/etc/xdg/flickos/input.conf`, `keyboard.conf` or
+   `idle.conf` (conffiles of flickos-control). Users' own choices still win.
+diff --git a/docs/design/flickos-hello.md b/docs/design/flickos-hello.md
+index abc7d5e..92d1381 100644
+--- a/docs/design/flickos-hello.md
++++ b/docs/design/flickos-hello.md
+@@ -1,6 +1,8 @@
+ # Hello (flickos-hello)
+ 
+-**Status:** Proposed, 2026-09-28.
++**Status:** Accepted, 2026-09-28. Phase 1 is done in flickos-hello 2.1 with
++flickos-control 1.20 and flickos-desktop 1.22. The package itself is described
++in [04](../04-packages.md#flickos-hello).
+ 
+ This document records why Hello, FlickOS's example program, is built the way
+ it is.
+@@ -143,10 +145,29 @@ repo was measured in the headless harness on the dev host: `greeting list`
+ takes 72 ms (budget 200 ms), and the window's first frame appears after
+ 570–680 ms (budget 1 s).
+ 
+-### Phase 1: The package
+-
+-flickos-hello with History, the tile and History in flickos-control, the
+-Recommends, the boot-test checks and the docs.
++### Phase 1: The package (done 2026-09-28)
++
++flickos-hello 2.1 (History), flickos-control 1.20 (the tile, the owner in
++History), flickos-desktop 1.22 (the Recommends), the boot-test checks and the
++docs. Measured on the dev host (i3):
++
++| What | Budget | Measured |
++|---|---|---|
++| `greeting list` | ≤ 200 ms | 76–79 ms (72 ms before History: `json` and `datetime` are imported now) |
++| `greeting set` (with the History record) | ≤ 200 ms | 79–81 ms |
++| The window's first frame (headless harness, FlickOS session) | ≤ 1 s | 540–570 ms |
++| Disk | | 35 KB installed, 8 KB download, no new dependencies in the image |
++| Idle | nothing | nothing runs until it is opened |
++
++- **Tests:** 25 in flickos-hello, and 4 new ones in flickos-control (326 in
++  all). No test reads or writes outside its temporary folders.
++- **The boot-test checks** passed in the FlickOS 2.1 live ISO with both new
++  packages installed from a local test repo. With only flickos-hello
++  installed, the History check fails, as it should: flickos-control 1.18
++  doesn't know the owner.
++- **Found while writing the tests:** the first version of the tests wrote to
++  the build host's `~/.local/state/flickos/history.jsonl` and read its
++  `/etc/xdg/flickos/history.conf`. `HomeTest` now fakes both.
+ 
+ ### Later
+ 
+diff --git a/packages/flickos-control/debian/changelog b/packages/flickos-control/debian/changelog
+index a9e55f5..4fd53f4 100644
+--- a/packages/flickos-control/debian/changelog
++++ b/packages/flickos-control/debian/changelog
+@@ -1,3 +1,11 @@
++flickos-control (1.20) trixie; urgency=medium
++
++  * More Settings: a Hello tile while flickos-hello is installed.
++    History shows the greeting's changes by name and undoes them with
++    flickos-hello greeting set.
++
++ -- Jon <dvbondoy@gmail.com>  Mon, 28 Sep 2026 08:21:26 +0800
++
+ flickos-control (1.19) trixie; urgency=medium
+ 
+   * Phone page (Devices; while flickos-phone is installed, not in the
+diff --git a/packages/flickos-control/tests/test_control.py b/packages/flickos-control/tests/test_control.py
+index f09c305..b80a0b7 100644
+--- a/packages/flickos-control/tests/test_control.py
++++ b/packages/flickos-control/tests/test_control.py
+@@ -1648,6 +1648,7 @@ if __name__ == "__main__":
+ 
+ 
+ TILER_PACKAGE = os.path.join(PACKAGE, "../flick-tiler")
++HELLO_PACKAGE = os.path.join(PACKAGE, "../flickos-hello")
+ 
+ 
+ class HistoryTest(SettingsTest):
+@@ -1916,6 +1917,15 @@ class HistoryTest(SettingsTest):
+         self.assertEqual((change.owner, change.key, change.old, change.new, change.undoable),
+                          ("flick-tiler", "gap", "default", "4", True))
+ 
++    @unittest.skipUnless(os.path.isdir(HELLO_PACKAGE), "flickos-hello is not next to this package")
++    def test_flickos_hello_writes_what_this_reads(self):
++        result = self.other_program(HELLO_PACKAGE, "flickos-hello", "greeting", "set", "mabuhay",
++                                    prefix_variable="FLICKOS_HELLO_PREFIX")
++        self.assertEqual(len(fc.read_history()), 1, result.stderr)
++        [change] = fc.shape_history(fc.read_history())
++        self.assertEqual((change.owner, change.key, change.old, change.new, change.undoable),
++                         ("flickos-hello", "greeting", "default", "mabuhay", True))
++
+ 
+ APT_LOG = """Start-Date: 2026-08-22  15:06:55
+ Commandline: apt-get -y install grub-efi
+@@ -2600,6 +2610,37 @@ class PhonesFirewallTest(SettingsTest):
+         self.assertFalse(fc.restorable(change))
+ 
+ 
++class HelloTest(unittest.TestCase):
++    """flickos-hello: its tile, and its greeting in History."""
++
++    def change(self, old, new):
++        return fc.Change("1", None, "flickos-hello", "greeting", old, new)
++
++    def test_tile_only_while_installed(self):
++        installed = fc.available_tiles(which=lambda program: "/usr/bin/x")
++        self.assertIn(("hello", ("flickos-hello", "show")), [(tile.id, tile.command) for tile in installed])
++        missing = fc.available_tiles(which=lambda program: None if program == "flickos-hello" else "/usr/bin/x")
++        self.assertNotIn("hello", [tile.id for tile in missing])
++
++    def test_history(self):
++        chosen = self.change("default", "mabuhay")
++        names = {("flickos-hello", "greeting"): {"mabuhay": "Mabuhay", "hello": "Hello"}}
++        self.assertEqual(fc.describe(chosen, names), ("Greeting: Mabuhay", "Was the default"))
++        self.assertEqual(fc.describe(self.change("mabuhay", "default"), names),
++                         ("Greeting: the default", "Was Mabuhay"))
++        self.assertEqual(fc.undo_commands(chosen), [["flickos-hello", "greeting", "set", "default"]])
++        self.assertTrue(fc.restorable(chosen))
++        with mock.patch.object(fc, "run", return_value="mabuhay\n") as run:
++            self.assertEqual(fc.current_value(chosen), "mabuhay")
++        run.assert_called_once_with(["flickos-hello", "greeting", "current"])
++
++    def test_greetings_are_named_by_hello_itself(self):
++        with mock.patch.object(fc, "run", return_value="hello\tHello\nmabuhay\tMabuhay\n") as run:
++            names = fc.history_names([self.change("default", "mabuhay")])
++        self.assertEqual(names, {("flickos-hello", "greeting"): {"hello": "Hello", "mabuhay": "Mabuhay"}})
++        run.assert_called_once_with(["flickos-hello", "greeting", "list"])
++
++
+ class PhoneTest(unittest.TestCase):
+     """The Phone page's words and flickos-phone's changes in History."""
+ 
+diff --git a/packages/flickos-control/usr/bin/flickos-control b/packages/flickos-control/usr/bin/flickos-control
+index 9dacd7d..73225d3 100755
+--- a/packages/flickos-control/usr/bin/flickos-control
++++ b/packages/flickos-control/usr/bin/flickos-control
+@@ -51,7 +51,8 @@ Automatic updates are unattended-upgrades' apt settings, read with
+ (`updates`, a drop-in in /etc/apt/apt.conf.d).
+ 
+ History: every change of a setting is recorded by the program that owns it
+-(this one, flickos-layout, flick-tiler) in $XDG_STATE_HOME/flickos/
++(this one, flickos-layout, flick-tiler, flickos-phone, flickos-hello) in
++$XDG_STATE_HOME/flickos/
+ history.jsonl. The History page and `history` show them and undo one by
+ running its owner's command with the old value, only while it is the
+ setting's newest change and the setting still holds its new value. This
+@@ -238,6 +239,7 @@ COMMAND_SECONDS = 20                # reading a setting (list, current, status)
+ LAYOUT = "flickos-layout"
+ TILER = "flick-tiler"
+ PHONE = "flickos-phone"
++HELLO = "flickos-hello"
+ PHONE_REFRESH_SECONDS = 3           # the Phone page reads the state again while it is shown
+ PHONE_PAIR_MINUTES = 2              # flickos-phone's PAIR_SECONDS: how long Add Phone waits
+ SHORTCUTS = "flickos-shortcuts"
+@@ -347,7 +349,8 @@ class Tile:
+ # When the icon theme has none of a tile's icons (a theme chosen in Appearance).
+ TILE_FALLBACK_ICONS = ("preferences-desktop", "preferences-system", "application-x-executable")
+ 
+-# The same apps as the Settings menu (flickos-settings' menu.xml).
++# The same apps as the Settings menu (flickos-settings' menu.xml), then apps
++# that own a setting of their own in their window (INT-4).
+ TILES = (
+     Tile("wallpaper", "Wallpaper", ("preferences-desktop-wallpaper",), ("waypaper",)),
+     Tile("appearance", "Appearance", ("preferences-desktop-theme",), ("nwg-look",)),
+@@ -357,6 +360,7 @@ TILES = (
+     Tile("bluetooth", "Bluetooth", ("bluetooth", "preferences-system-bluetooth"), ("blueman-manager",)),
+     Tile("printers", "Printers", ("printer",), ("system-config-printer",)),
+     Tile("updates", "Software Updates", ("system-software-update",), ("gpk-update-viewer",)),
++    Tile("hello", "Hello", ("face-smile",), (HELLO, "show")),
+ )
+ 
+ 
+@@ -400,6 +404,7 @@ SEARCH_KEYWORDS = {
+     "tile:bluetooth": "bluetooth pair devices headphones",
+     "tile:printers": "printer printers printing print scanner",
+     "tile:updates": "software updates upgrade install",
++    "tile:hello": "greeting hello hi mabuhay howdy good day welcome message",
+ }
+ SEARCH_RESULTS = 30                 # at most this many results
+ 
+@@ -695,6 +700,7 @@ DEFAULT_CHOICE = "default"          # the owner's word for "remove the user's va
+ LAYOUT_HISTORY_KEYS = ("layout", "style", "clicks", "launcher", "menu-style", "clock")
+ TILER_HISTORY_KEYS = ("enabled", "mode", "ratio", "gap", "floating")
+ PHONE_HISTORY_KEYS = ("enabled", "name", "networks")      # pairing (device.ID) is only shown
++HELLO_HISTORY_KEYS = ("greeting",)
+ 
+ # What History calls each setting. Words of the pages that show them.
+ HISTORY_LABELS = {
+@@ -735,6 +741,7 @@ HISTORY_LABELS = {
+     (PHONE, "enabled"): "Phone connection",
+     (PHONE, "name"): "This computer's name on the phone",
+     (PHONE, "networks"): "Networks for the phone connection",
++    (HELLO, "greeting"): "Greeting",
+ }
+ 
+ 
+@@ -876,6 +883,8 @@ def can_undo(change):
+         return key in TILER_HISTORY_KEYS
+     if owner == PHONE:
+         return key in PHONE_HISTORY_KEYS
++    if owner == HELLO:
++        return key in HELLO_HISTORY_KEYS
+     if owner != HISTORY_OWNER:
+         return False
+     if key == RESTORE_KEY:
+@@ -973,6 +982,8 @@ def undo_commands(change):
+                            if pattern.lower() not in {p.lower() for p in after}]
+     if owner == PHONE and key in PHONE_HISTORY_KEYS:
+         return [[PHONE, "set", key, old]]
++    if owner == HELLO and key == "greeting":
++        return [[HELLO, "greeting", "set", old]]
+     raise ControlError(f"{owner} {key}: History can't undo this")
+ 
+ 
+@@ -1009,6 +1020,8 @@ def current_value(change):
+         return None if value is None else str(value)
+     if owner == PHONE and key in PHONE_HISTORY_KEYS:
+         return run([PHONE, "get", key]).strip()
++    if owner == HELLO and key == "greeting":
++        return run([HELLO, "greeting", "current"]).strip()
+     return None
+ 
+ 
+@@ -1067,7 +1080,7 @@ def when_words(when, names):
+ def restorable(change):
+     """Settings a restore puts back: the ones without a password."""
+     owner, key = change.owner, change.key
+-    if owner in (LAYOUT, TILER, PHONE):
++    if owner in (LAYOUT, TILER, PHONE, HELLO):
+         return can_undo(change)
+     if owner != HISTORY_OWNER or key == RESTORE_KEY or key in SYSTEM_LABELS:
+         return False
+@@ -1134,10 +1147,10 @@ def restore(when_text, dry_run=False):
+ 
+ def history_names(changes, clock=False):
+     """{(owner, key): {value: name}} for the values of these changes that have
+-    names elsewhere (layouts, styles, tiling arrangements), and with clock the
+-    panel clock's hours ("clock": "12h") for showing times. The owners are
+-    asked only when needed, at the same time. What can't be read is shown as
+-    it is."""
++    names elsewhere (layouts, styles, tiling arrangements, greetings), and
++    with clock the panel clock's hours ("clock": "12h") for showing times. The
++    owners are asked only when needed, at the same time. What can't be read is
++    shown as it is."""
+     names = {}
+ 
+     def layout_names():
+@@ -1153,9 +1166,14 @@ def history_names(changes, clock=False):
+         with contextlib.suppress(ControlError):
+             names[(TILER, "mode")] = {item.id: item.name for item in parse_items(run([TILER, "modes"]))}
+ 
++    def hello_names():
++        with contextlib.suppress(ControlError):
++            names[(HELLO, "greeting")] = {item.id: item.name for item in parse_items(run([HELLO, "greeting", "list"]))}
++
+     owners = {(change.owner, change.key) for change in changes}
+     work = ([layout_names] if clock or any(owner == LAYOUT for owner, _ in owners) else []) + (
+-        [tiler_names] if (TILER, "mode") in owners else [])
++        [tiler_names] if (TILER, "mode") in owners else []) + (
++        [hello_names] if (HELLO, "greeting") in owners else [])
+     threads = [threading.Thread(target=function, daemon=True) for function in work]
+     for thread in threads:
+         thread.start()
+diff --git a/packages/flickos-desktop/debian/changelog b/packages/flickos-desktop/debian/changelog
+index feb78ca..ad910d7 100644
+--- a/packages/flickos-desktop/debian/changelog
++++ b/packages/flickos-desktop/debian/changelog
+@@ -1,3 +1,9 @@
++flickos-desktop (1.22) trixie; urgency=medium
++
++  * Recommend flickos-hello, the example program.
++
++ -- Jon <dvbondoy@gmail.com>  Mon, 28 Sep 2026 08:21:36 +0800
++
+ flickos-desktop (1.21) trixie; urgency=medium
+ 
+   * Depend on flickos-phone: pages, files and text from and to a phone,
+diff --git a/packages/flickos-desktop/debian/control b/packages/flickos-desktop/debian/control
+index 45fa25b..13dd9fb 100644
+--- a/packages/flickos-desktop/debian/control
++++ b/packages/flickos-desktop/debian/control
+@@ -113,7 +113,11 @@ Recommends: foot,
+             nano,
+             less,
+             pciutils,
+-            usbutils
++            usbutils,
++# flickos-hello: the example program (docs/design/flickos-hello.md). An app
++# users may remove, so a Recommends: removing it must not remove the desktop.
++# It reaches new installs only (a Recommends never reaches installed systems).
++            flickos-hello
+ Description: FlickOS desktop environment (metapackage)
+  Installs the complete FlickOS labwc desktop: compositor, panel,
+  notifications, portals, PipeWire audio, networking, Bluetooth, printing,
+diff --git a/packages/flickos-hello/debian/changelog b/packages/flickos-hello/debian/changelog
+new file mode 100644
+index 0000000..8fef04b
+--- /dev/null
++++ b/packages/flickos-hello/debian/changelog
+@@ -0,0 +1,21 @@
++flickos-hello (2.1) trixie; urgency=medium
++
++  * Record every change of the greeting for Settings → History, which
++    shows it and undoes it with greeting set OLD.
++
++ -- Jon <dvbondoy@gmail.com>  Mon, 28 Sep 2026 08:19:34 +0800
++
++flickos-hello (2.0) trixie; urgency=medium
++
++  * Rewritten the FlickOS way: greetings from a list (greeting
++    list|current|set ID|default), a user's own choice in
++    ~/.config/flickos/hello, and a window (show). hello.conf now holds a
++    greeting's id; the old text still works.
++
++ -- Jon <dvbondoy@gmail.com>  Mon, 28 Sep 2026 07:51:31 +0800
++
++flickos-hello (1.0) trixie; urgency=medium
++
++  * First version: says hello.
++
++ -- Jon <dvbondoy@gmail.com>  Mon, 28 Sep 2026 00:03:18 +0800
+diff --git a/packages/flickos-hello/debian/control b/packages/flickos-hello/debian/control
+new file mode 100644
+index 0000000..834d801
+--- /dev/null
++++ b/packages/flickos-hello/debian/control
+@@ -0,0 +1,23 @@
++Source: flickos-hello
++Section: utils
++Priority: optional
++Maintainer: Jon <dvbondoy@gmail.com>
++# python3: the unit tests run while the package builds. They need no GTK.
++Build-Depends: debhelper-compat (= 13),
++               python3
++Standards-Version: 4.7.0
++Rules-Requires-Root: no
++
++Package: flickos-hello
++Architecture: all
++# python3-gi, gir1.2-gtk-3.0: the window (show), GTK 3 so it follows the Arc
++# theme. Everything else is the standard library.
++Depends: python3,
++         python3-gi,
++         gir1.2-gtk-3.0,
++         ${misc:Depends}
++Description: says hello, with the greeting you choose (example package)
++ The example program of FlickOS's tutorial on writing a program. It owns
++ one setting, the greeting: a default for the computer in
++ /etc/xdg/flickos/hello.conf, and each account's own choice, made on the
++ command line or in a small window.
+diff --git a/packages/flickos-hello/debian/copyright b/packages/flickos-hello/debian/copyright
+new file mode 100644
+index 0000000..240212a
+--- /dev/null
++++ b/packages/flickos-hello/debian/copyright
+@@ -0,0 +1,22 @@
++Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
++Upstream-Name: flickos-hello
++Upstream-Contact: Jon <dvbondoy@gmail.com>
++Source: https://github.com/dvbondoy/FlickOS
++
++Files: *
++Copyright: 2026 Jon <dvbondoy@gmail.com>
++License: GPL-3+
++
++License: GPL-3+
++ This program is free software: you can redistribute it and/or modify
++ it under the terms of the GNU General Public License as published by
++ the Free Software Foundation, either version 3 of the License, or
++ (at your option) any later version.
++ .
++ This program is distributed in the hope that it will be useful,
++ but WITHOUT ANY WARRANTY; without even the implied warranty of
++ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ GNU General Public License for more details.
++ .
++ On Debian systems, the complete text of the GNU General Public License
++ version 3 can be found in "/usr/share/common-licenses/GPL-3".
+diff --git a/packages/flickos-hello/debian/flickos-hello.1 b/packages/flickos-hello/debian/flickos-hello.1
+new file mode 100644
+index 0000000..7896766
+--- /dev/null
++++ b/packages/flickos-hello/debian/flickos-hello.1
+@@ -0,0 +1,51 @@
++.TH FLICKOS-HELLO 1 "2026-09-28" "flickos-hello 2.1" "FlickOS"
++.SH NAME
++flickos-hello \- say hello, with the greeting you choose
++.SH SYNOPSIS
++.B flickos-hello
++.RB [ say
++.RI [ NAME ]]
++.br
++.B flickos-hello show
++.br
++.B flickos-hello greeting
++.BR list " | " current " | " set
++.IR ID | default
++.SH DESCRIPTION
++.B flickos-hello
++prints a greeting to
++.I NAME
++(your user name when it is left out).
++It is the example program of FlickOS's tutorial on writing a program.
++.TP
++.B show
++Open the Hello window, where the greeting can be chosen.
++.TP
++.B greeting list
++Print the greetings, one per line: id, a tab, the text.
++.TP
++.B greeting current
++Print the id of the greeting in use.
++.TP
++.BI "greeting set " ID
++Choose a greeting;
++.B default
++goes back to the computer's.
++.SH FILES
++.TP
++.I /etc/xdg/flickos/hello.conf
++The greeting for every account:
++.B Greeting=
++in the
++.B [Hello]
++section.
++.TP
++.I ~/.config/flickos/hello
++Your own choice, in the same format. It wins over the one above.
++.TP
++.I ~/.local/state/flickos/history.jsonl
++Every change of the greeting is added here, for
++.I Settings \(-> History
++(flickos-control), unless History is turned off there.
++.SH "EXIT STATUS"
++0 ok, 1 error, 2 usage error.
+diff --git a/packages/flickos-hello/debian/install b/packages/flickos-hello/debian/install
+new file mode 100644
+index 0000000..058e570
+--- /dev/null
++++ b/packages/flickos-hello/debian/install
+@@ -0,0 +1,3 @@
++usr/bin/flickos-hello                           usr/bin/
++etc/xdg/flickos/hello.conf                      etc/xdg/flickos/
++usr/share/applications/flickos-hello.desktop    usr/share/applications/
+diff --git a/packages/flickos-hello/debian/manpages b/packages/flickos-hello/debian/manpages
+new file mode 100644
+index 0000000..a8b59b0
+--- /dev/null
++++ b/packages/flickos-hello/debian/manpages
+@@ -0,0 +1 @@
++debian/flickos-hello.1
+diff --git a/packages/flickos-hello/debian/rules b/packages/flickos-hello/debian/rules
+new file mode 100755
+index 0000000..e467e28
+--- /dev/null
++++ b/packages/flickos-hello/debian/rules
+@@ -0,0 +1,11 @@
++#!/usr/bin/make -f
++
++# No bytecode (__pycache__) next to the files that get installed.
++export PYTHONDONTWRITEBYTECODE = 1
++
++%:
++	dh $@
++
++# Skipped with DEB_BUILD_OPTIONS=nocheck.
++override_dh_auto_test:
++	python3 -m unittest discover -s tests -v
+diff --git a/packages/flickos-hello/debian/source/format b/packages/flickos-hello/debian/source/format
+new file mode 100644
+index 0000000..89ae9db
+--- /dev/null
++++ b/packages/flickos-hello/debian/source/format
+@@ -0,0 +1 @@
++3.0 (native)
+diff --git a/packages/flickos-hello/etc/xdg/flickos/hello.conf b/packages/flickos-hello/etc/xdg/flickos/hello.conf
+new file mode 100644
+index 0000000..508dfb1
+--- /dev/null
++++ b/packages/flickos-hello/etc/xdg/flickos/hello.conf
+@@ -0,0 +1,6 @@
++# flickos-hello's greeting for every account on this computer.
++# An account's own choice (flickos-hello greeting set ID, or the Hello window)
++# is in ~/.config/flickos/hello and wins.
++# The greetings: flickos-hello greeting list
++[Hello]
++Greeting=hello
+diff --git a/packages/flickos-hello/tests/test_hello.py b/packages/flickos-hello/tests/test_hello.py
+new file mode 100644
+index 0000000..62b8fee
+--- /dev/null
++++ b/packages/flickos-hello/tests/test_hello.py
+@@ -0,0 +1,265 @@
++"""Tests for usr/bin/flickos-hello. Run: python3 -m unittest discover -s tests"""
++
++import configparser
++import importlib.machinery
++import importlib.util
++import io
++import json
++import os
++import shutil
++import subprocess
++import sys
++import tempfile
++import unittest
++from unittest import mock
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++PACKAGE = os.path.dirname(HERE)
++PROGRAM = os.path.join(PACKAGE, "usr/bin/flickos-hello")
++SHIPPED_CONF = os.path.join(PACKAGE, "etc/xdg/flickos/hello.conf")
++DESKTOP_FILE = os.path.join(PACKAGE, "usr/share/applications/flickos-hello.desktop")
++
++# The program has no .py ending, so import it by its path.
++sys.dont_write_bytecode = True
++_loader = importlib.machinery.SourceFileLoader("flickos_hello", PROGRAM)
++hello = importlib.util.module_from_spec(importlib.util.spec_from_loader(_loader.name, _loader))
++_loader.exec_module(hello)
++
++
++def quiet():
++    """Swallow the program's warnings (stderr) in a test that expects them."""
++    return mock.patch.object(hello.sys, "stderr", new_callable=io.StringIO)
++
++
++def run_main(*argv):
++    """main(argv) → (exit code, stdout)."""
++    with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
++        code = hello.main(list(argv))
++    return code, out.getvalue()
++
++
++class HomeTest(unittest.TestCase):
++    """Every test gets its own ~/.config, ~/.local/state (the history) and
++    /etc/xdg/flickos/, never the build host's: the build runs on a real FlickOS
++    desktop, and a test must not add to its Settings → History."""
++
++    def setUp(self):
++        self.root = tempfile.mkdtemp()
++        self.addCleanup(shutil.rmtree, self.root, True)
++        self.home = os.path.join(self.root, "config")
++        self.system_conf = os.path.join(self.root, "etc/xdg/flickos/hello.conf")
++        environ = {"XDG_CONFIG_HOME": self.home, "XDG_STATE_HOME": os.path.join(self.root, "state")}
++        for patch in (mock.patch.dict(os.environ, environ),
++                      mock.patch.object(hello, "SYSTEM_CONF", self.system_conf),
++                      mock.patch.object(hello, "HISTORY_CONF", os.path.join(self.root, "etc/xdg/flickos/history.conf"))):
++            patch.start()
++            self.addCleanup(patch.stop)
++
++    def write(self, path, text):
++        os.makedirs(os.path.dirname(path), exist_ok=True)
++        with open(path, "w", encoding="utf-8") as f:
++            f.write(text)
++
++    def system_says(self, value):
++        self.write(self.system_conf, f"[Hello]\nGreeting={value}\n")
++
++    def user_says(self, value):
++        self.write(hello.user_conf(), f"[Hello]\nGreeting={value}\n")
++
++
++class ReadTest(HomeTest):
++    def test_no_files_is_the_default(self):
++        self.assertEqual(hello.current_greeting(), hello.DEFAULT_GREETING)
++
++    def test_the_system_file_sets_it(self):
++        self.system_says("howdy")
++        self.assertEqual(hello.current_greeting(), "howdy")
++
++    def test_the_user_wins(self):
++        self.system_says("howdy")
++        self.user_says("hi")
++        self.assertEqual(hello.current_greeting(), "hi")
++
++    def test_text_and_any_case_are_understood(self):
++        """1.x's hello.conf held the text (Greeting=Hello), and an administrator
++        who edited it kept theirs on upgrade (a conffile)."""
++        self.system_says("MABUHAY")
++        self.assertEqual(hello.current_greeting(), "mabuhay")
++        self.system_says("Good day")
++        self.assertEqual(hello.current_greeting(), "good-day")
++
++    def test_an_unknown_greeting_is_ignored_with_a_warning(self):
++        self.system_says("howdy")
++        self.user_says("Bonjour")
++        with quiet() as err:
++            self.assertEqual(hello.current_greeting(), "howdy")
++        self.assertIn("unknown greeting 'Bonjour'", err.getvalue())
++
++    def test_a_broken_file_is_ignored_with_a_one_line_warning(self):
++        self.write(self.system_conf, "garbage [[\n")
++        with quiet() as err:
++            self.assertEqual(hello.current_greeting(), hello.DEFAULT_GREETING)
++        self.assertEqual(len(err.getvalue().splitlines()), 1, err.getvalue())
++        self.assertTrue(err.getvalue().startswith("flickos-hello: "))
++
++
++class CommandTest(HomeTest):
++    def test_say(self):
++        self.assertEqual(run_main("say", "Ana"), (0, "Hello, Ana!\n"))
++
++    def test_no_command_says_hello_to_you(self):
++        with mock.patch.object(hello.getpass, "getuser", return_value="jon"):
++            self.assertEqual(run_main(), (0, "Hello, jon!\n"))
++
++    def test_list_is_id_tab_text(self):
++        code, out = run_main("greeting", "list")
++        self.assertEqual(code, 0)
++        lines = out.splitlines()
++        self.assertEqual(len(lines), len(hello.GREETINGS))
++        self.assertEqual(lines[0], "hello\tHello")
++
++    def test_set_and_current(self):
++        self.assertEqual(run_main("greeting", "set", "mabuhay"), (0, ""), "success is quiet")
++        self.assertEqual(run_main("greeting", "current"), (0, "mabuhay\n"))
++        self.assertEqual(run_main("say", "Ana"), (0, "Mabuhay, Ana!\n"))
++
++    def test_set_default_goes_back_to_the_machines(self):
++        self.system_says("howdy")
++        run_main("greeting", "set", "hi")
++        self.assertEqual(run_main("greeting", "set", "default"), (0, ""))
++        self.assertEqual(run_main("greeting", "current"), (0, "howdy\n"))
++        self.assertFalse(os.path.exists(hello.user_conf()), "no choice, no file")
++        self.assertEqual(run_main("greeting", "set", "default"), (0, ""), "twice is fine")
++
++    def test_set_writes_one_file_and_nothing_else(self):
++        run_main("greeting", "set", "hi")
++        self.assertEqual(os.listdir(os.path.dirname(hello.user_conf())), ["hello"],
++                         "no temporary file left behind")
++        ini = configparser.ConfigParser()
++        ini.read(hello.user_conf())
++        self.assertEqual(ini["Hello"]["Greeting"], "hi")
++
++    def test_an_unknown_greeting_is_a_usage_error(self):
++        with quiet(), self.assertRaises(SystemExit) as exit_:
++            hello.main(["greeting", "set", "bonjour"])
++        self.assertEqual(exit_.exception.code, 2)
++
++    def test_a_read_only_folder_is_an_error_not_a_crash(self):
++        folder = os.path.dirname(hello.user_conf())
++        os.makedirs(folder)
++        os.chmod(folder, 0o500)
++        self.addCleanup(os.chmod, folder, 0o700)
++        if os.access(folder, os.W_OK):
++            self.skipTest("running as root: every folder is writable")
++        with quiet() as err:
++            self.assertEqual(run_main("greeting", "set", "hi")[0], 1)
++        self.assertIn("can't save the greeting", err.getvalue())
++        self.assertEqual(os.listdir(folder), [], "no temporary file left behind")
++
++
++class HistoryTest(HomeTest):
++    """Settings → History reads what `greeting set` records."""
++
++    def history(self):
++        path = os.path.join(hello.state_home(), "flickos", hello.HISTORY_FILE)
++        if not os.path.exists(path):
++            return []
++        with open(path, encoding="utf-8") as f:
++            return [json.loads(line) for line in f]
++
++    def test_a_change_is_recorded_in_the_shared_format(self):
++        run_main("greeting", "set", "mabuhay")
++        [entry] = self.history()
++        self.assertEqual({key: entry[key] for key in ("v", "owner", "key", "old", "new")},
++                         {"v": 1, "owner": "flickos-hello", "key": "greeting", "old": "default", "new": "mabuhay"})
++        self.assertTrue(entry["id"].isdigit(), "nanoseconds since 1970, as a string")
++
++    def test_default_is_recorded_as_default(self):
++        run_main("greeting", "set", "mabuhay")
++        run_main("greeting", "set", "default")
++        self.assertEqual([(e["old"], e["new"]) for e in self.history()],
++                         [("default", "mabuhay"), ("mabuhay", "default")])
++
++    def test_no_change_no_record(self):
++        run_main("greeting", "set", "hi")
++        run_main("greeting", "set", "hi")
++        self.assertEqual(len(self.history()), 1)
++
++    def test_history_turned_off_records_nothing(self):
++        self.write(os.path.join(self.home, "flickos", "history"), "[History]\nEnabled=no\n")
++        run_main("greeting", "set", "hi")
++        self.assertEqual(self.history(), [])
++
++    def test_a_history_that_cant_be_written_is_only_a_warning(self):
++        self.write(os.path.join(hello.state_home(), "flickos"), "a file where the folder should be")
++        with quiet() as err:
++            self.assertEqual(run_main("greeting", "set", "hi"), (0, ""))
++        self.assertIn("the history can't be written", err.getvalue())
++        self.assertEqual(run_main("greeting", "current"), (0, "hi\n"), "the change itself is saved")
++
++
++class SingleInstanceTest(unittest.TestCase):
++    def test_second_window_is_refused_while_one_is_open(self):
++        with tempfile.TemporaryDirectory() as runtime, \
++                mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": runtime}):
++            with hello.single_instance() as first:
++                self.assertTrue(first)
++                with hello.single_instance() as second:
++                    self.assertFalse(second)
++            with hello.single_instance() as again:
++                self.assertTrue(again, "closing the window frees the lock")
++
++    def test_show_opens_no_window_while_one_is_open(self):
++        with tempfile.TemporaryDirectory() as runtime, \
++                mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": runtime}), \
++                mock.patch.object(hello, "load_gtk") as load_gtk:
++            with hello.single_instance():
++                self.assertEqual(run_main("show"), (0, "Hello is already open.\n"))
++            load_gtk.assert_not_called()
++
++
++class NoGtkTest(unittest.TestCase):
++    def test_commands_do_not_load_gtk(self):
++        """PERF-3: GTK is imported only for the window, so commands start fast
++        and work without a display. Run in a fresh Python, which has nothing
++        imported yet."""
++        check = ("import runpy, sys\n"
++                 "sys.argv = [sys.argv[1], 'greeting', 'list']\n"
++                 "try:\n    runpy.run_path(sys.argv[0], run_name='__main__')\n"
++                 "except SystemExit:\n    pass\n"
++                 "print('gi' in sys.modules)\n")
++        with tempfile.TemporaryDirectory() as root:
++            env = dict(os.environ, XDG_CONFIG_HOME=root, FLICKOS_HELLO_PREFIX=root)
++            out = subprocess.run([sys.executable, "-c", check, PROGRAM], env=env,
++                                 capture_output=True, text=True, check=True).stdout
++        self.assertEqual(out.splitlines()[-1], "False")
++
++
++class ShippedFilesTest(unittest.TestCase):
++    """What must hold between the files of this package (HIG PKG-8)."""
++
++    def test_shipped_conf_names_the_default_greeting(self):
++        ini = configparser.ConfigParser()
++        ini.read(SHIPPED_CONF, encoding="utf-8")
++        self.assertEqual(ini["Hello"]["Greeting"], hello.DEFAULT_GREETING)
++
++    def test_greeting_ids_are_unique_and_simple(self):
++        ids = [greeting for greeting, _text in hello.GREETINGS]
++        self.assertEqual(len(ids), len(set(ids)))
++        for greeting in ids:
++            self.assertRegex(greeting, r"^[a-z][a-z-]*$")
++
++    def test_desktop_file_matches_the_program(self):
++        entry = configparser.ConfigParser(interpolation=None)
++        entry.optionxform = str
++        entry.read(DESKTOP_FILE, encoding="utf-8")
++        desktop = entry["Desktop Entry"]
++        self.assertEqual(desktop["Name"], hello.TITLE, "WIN-4: the title is the Name")
++        self.assertEqual(desktop["Icon"], hello.ICON)
++        self.assertEqual(desktop["Exec"], "flickos-hello show")
++        self.assertEqual(os.path.basename(DESKTOP_FILE), hello.APP_ID + ".desktop",
++                         "INT-2: the file name is the Wayland app id")
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/packages/flickos-hello/usr/bin/flickos-hello b/packages/flickos-hello/usr/bin/flickos-hello
+new file mode 100755
+index 0000000..1f24fe6
+--- /dev/null
++++ b/packages/flickos-hello/usr/bin/flickos-hello
+@@ -0,0 +1,427 @@
++#!/usr/bin/python3
++"""Hello: greets you with the greeting you choose. The example program of
++FlickOS's tutorial on writing a program (~/Documents/flickos-code-tutorial).
++
++It owns one setting, the greeting. The machine's default is in the conffile
++/etc/xdg/flickos/hello.conf ([Hello] Greeting=ID); a user's choice is in
++~/.config/flickos/hello, written only when they choose one, and wins. A file
++that can't be read, or a greeting this version doesn't know, is warned about
++and ignored, so the program always starts. A greeting may be written as its id
++(mabuhay) or its text (Mabuhay): hello.conf 1.x held the text.
++
++Every change of the greeting is recorded for Settings → History
++(flickos-control), which shows it and undoes it with `greeting set OLD`.
++
++The window (show) is a plain GTK 3 window (python3-gi), so it follows the
++Arc-Dark or Arc theme of the chosen style, and it has no CSS of its own. GTK is
++imported only when the window opens, so the other commands work without a
++display. One window per session: a second show while it is open only says so
++(hello.lock in $XDG_RUNTIME_DIR/flickos). A greeting applies as soon as it is
++chosen; Escape or Close closes the window.
++
++Commands:
++  (none), say [NAME]      print the greeting to NAME (default: your user name)
++  show                    open the window
++  greeting list           print the greetings: id, text
++  greeting current        print the id of the greeting in use
++  greeting set ID|default choose a greeting (default: the machine's)
++
++Exit codes: 0 ok, 1 error, 2 usage error.
++"""
++
++import argparse
++import configparser
++import contextlib
++import datetime
++import fcntl
++import getpass
++import json
++import os
++import sys
++import tempfile
++import time
++
++NAME = "flickos-hello"
++APP_ID = "flickos-hello"            # Wayland app id, matches flickos-hello.desktop
++TITLE = "Hello"                     # the desktop file's Name (a test checks)
++ICON = "face-smile"                 # in Numix (Numix-Circle inherits it)
++# Testing hook (unit tests): a root to read /etc below.
++PREFIX = os.environ.get("FLICKOS_HELLO_PREFIX", "")
++SYSTEM_CONF = PREFIX + "/etc/xdg/flickos/hello.conf"
++SECTION = "Hello"
++KEY = "Greeting"
++# In $XDG_RUNTIME_DIR/flickos: held while the window is open (one per session).
++LOCK = "hello.lock"
++
++# Settings → History: every change of the greeting is one JSON line appended to
++# $XDG_STATE_HOME/flickos/history.jsonl, in the format every owner shares
++# (docs/design/flickos-history.md, ADR-002). History undoes a change by running
++# `greeting set OLD`.
++HISTORY_OWNER = NAME
++HISTORY_KEY = "greeting"            # the setting's name in the history
++HISTORY_FILE = "history.jsonl"      # in $XDG_STATE_HOME/flickos
++HISTORY_LOCK = "history.lock"
++HISTORY_BYTES = 256 * 1024          # above this, the older half is dropped
++# flickos-control's: [History] Enabled=, then the user's ~/.config/flickos/history.
++HISTORY_CONF = PREFIX + "/etc/xdg/flickos/history.conf"
++DEFAULT_CHOICE = "default"          # no choice of the user's: `greeting set default`, and in the history
++
++# The greetings, in the order they are listed: id (stored in the files, never
++# changed once shipped), text. Adding a greeting is adding a row.
++GREETINGS = [
++    ("hello", "Hello"),
++    ("hi", "Hi"),
++    ("mabuhay", "Mabuhay"),
++    ("howdy", "Howdy"),
++    ("good-day", "Good day"),
++]
++# When neither file sets one. The shipped hello.conf says the same (a test checks).
++DEFAULT_GREETING = "hello"
++
++
++def warn(message):
++    print(f"{NAME}: {message}", file=sys.stderr)
++
++
++def escape(text):
++    """Escape Pango markup in text shown with set_markup."""
++    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
++
++
++# --- The setting -------------------------------------------------------------
++
++def config_home():
++    return os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
++
++
++def user_conf():
++    return os.path.join(config_home(), "flickos", "hello")
++
++
++def read_ini(path):
++    """The [Hello] keys of an INI file (lower-case names). A missing file is
++    empty; a broken one is empty with a warning."""
++    ini = configparser.ConfigParser(interpolation=None)
++    try:
++        ini.read(path, encoding="utf-8")
++    except (configparser.Error, UnicodeDecodeError) as error:
++        # configparser's messages run over several lines; the first says it.
++        warn(f"{path}: can't read it, ignored ({str(error).splitlines()[0].rstrip('.')})")
++        return {}
++    return dict(ini[SECTION]) if ini.has_section(SECTION) else {}
++
++
++def greeting_id(value, path):
++    """The id for a Greeting= value, given as an id or a text, any case, or
++    None (with a warning) when this version doesn't know it."""
++    wanted = value.strip().lower()
++    for greeting, text in GREETINGS:
++        if wanted in (greeting, text.lower()):
++            return greeting
++    warn(f"{path}: unknown greeting '{value.strip()}', ignored")
++    return None
++
++
++def system_greeting():
++    """The machine's greeting: hello.conf's, else DEFAULT_GREETING. What
++    `greeting set default` goes back to."""
++    value = read_ini(SYSTEM_CONF).get(KEY.lower())
++    return (value is not None and greeting_id(value, SYSTEM_CONF)) or DEFAULT_GREETING
++
++
++def user_greeting():
++    """The user's own choice, or None."""
++    value = read_ini(user_conf()).get(KEY.lower())
++    return greeting_id(value, user_conf()) if value is not None else None
++
++
++def current_greeting():
++    return user_greeting() or system_greeting()
++
++
++def greeting_text(greeting):
++    return dict(GREETINGS)[greeting]
++
++
++def write_atomic(path, text):
++    """Write text to path through a temporary file in the same folder, so no
++    one ever reads half a file. Raises OSError."""
++    folder = os.path.dirname(path)
++    os.makedirs(folder, exist_ok=True)
++    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".", suffix=".tmp")
++    try:
++        with os.fdopen(fd, "w", encoding="utf-8") as f:
++            f.write(text)
++        os.chmod(tmp, 0o644)
++        os.replace(tmp, path)
++    except BaseException:
++        with contextlib.suppress(OSError):
++            os.unlink(tmp)
++        raise
++
++
++def save_greeting(greeting):
++    """Store the user's choice; None removes it, so the machine's applies again.
++    The file goes away when nothing is left in it. The change is recorded for
++    Settings → History. Raises OSError."""
++    path = user_conf()
++    old = user_greeting() or DEFAULT_CHOICE
++    if greeting is None:
++        with contextlib.suppress(FileNotFoundError):
++            os.unlink(path)
++    else:
++        write_atomic(path, f"# Written by {NAME}. Change it with: {NAME} greeting set ID|default\n"
++                           f"[{SECTION}]\n{KEY}={greeting}\n")
++    record(HISTORY_KEY, old, greeting or DEFAULT_CHOICE)
++
++
++# --- History -----------------------------------------------------------------
++
++def state_home():
++    return os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
++
++
++def history_enabled():
++    """[History] Enabled= of the user's file, else the system's; on by default.
++    flickos-control owns the setting; every owner reads it the same way."""
++    enabled = True
++    for path in (HISTORY_CONF, os.path.join(config_home(), "flickos", "history")):
++        ini = configparser.ConfigParser(interpolation=None)
++        try:
++            ini.read(path, encoding="utf-8")
++            value = ini.get("History", "Enabled", fallback=None)
++        except (configparser.Error, UnicodeDecodeError):
++            continue
++        if value is not None:
++            enabled = value.strip().lower() not in ("no", "false", "off", "0")
++    return enabled
++
++
++def record(key, old, new):
++    """Add a change to the history. It never stops the change itself: a
++    history that can't be written is only a warning."""
++    if old == new or not history_enabled():
++        return
++    now = time.time_ns()
++    entry = {"v": 1, "id": str(now),
++             "time": datetime.datetime.fromtimestamp(now / 1e9).astimezone().isoformat(timespec="seconds"),
++             "owner": HISTORY_OWNER, "key": key, "old": old, "new": new}
++    folder = os.path.join(state_home(), "flickos")
++    try:
++        os.makedirs(folder, mode=0o700, exist_ok=True)
++        with open(os.path.join(folder, HISTORY_LOCK), "a") as lock:
++            fcntl.flock(lock, fcntl.LOCK_EX)
++            path = os.path.join(folder, HISTORY_FILE)
++            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
++            with os.fdopen(fd, "a", encoding="utf-8") as f:
++                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
++                size = os.fstat(f.fileno()).st_size
++            if size > HISTORY_BYTES:
++                trim_history(path)
++    except OSError as error:
++        warn(f"the history can't be written: {error}")
++
++
++def trim_history(path):
++    """Keep the newest lines that fit in half of HISTORY_BYTES (under the lock)."""
++    with open(path, encoding="utf-8", errors="replace") as f:
++        lines = f.readlines()
++    kept, size = [], 0
++    for line in reversed(lines):
++        size += len(line.encode())
++        if size > HISTORY_BYTES // 2:
++            break
++        kept.append(line)
++    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".", suffix=".tmp")
++    try:
++        with os.fdopen(fd, "w", encoding="utf-8") as f:
++            f.writelines(reversed(kept))
++        os.replace(tmp, path)
++    except BaseException:
++        with contextlib.suppress(OSError):
++            os.unlink(tmp)
++        raise
++
++
++# --- Single instance ---------------------------------------------------------
++
++@contextlib.contextmanager
++def single_instance():
++    """Yields True for the first window of the session, False while one is open.
++    Without XDG_RUNTIME_DIR there is nothing to share, so always True."""
++    base = os.environ.get("XDG_RUNTIME_DIR")
++    if not base:
++        yield True
++        return
++    folder = os.path.join(base, "flickos")
++    os.makedirs(folder, exist_ok=True)
++    with open(os.path.join(folder, LOCK), "a") as lock:
++        try:
++            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        except BlockingIOError:
++            yield False
++            return
++        yield True
++
++
++# --- The window --------------------------------------------------------------
++
++def load_gtk():
++    """GTK 3, or None with a warning (not installed, or no display)."""
++    try:
++        import gi
++        gi.require_version("Gtk", "3.0")
++        gi.require_version("Gdk", "3.0")
++        from gi.repository import GLib
++        GLib.set_prgname(APP_ID)
++        from gi.repository import Gdk, Gtk
++    except (ImportError, ValueError) as error:
++        warn(f"can't open the window ({error}); python3-gi and gir1.2-gtk-3.0 are needed")
++        return None
++    if not Gtk.init_check(sys.argv[:1])[0]:
++        warn("can't open the window (no display)")
++        return None
++    return Gtk, Gdk
++
++
++def window(Gtk, Gdk):
++    """Build and show the window. Returns 0 when it is closed."""
++    name = getpass.getuser()
++    system = system_greeting()          # read once: it can't change while the window is open
++    win = Gtk.Window(title=TITLE, icon_name=ICON)
++    win.set_default_size(420, 220)
++    win.connect("destroy", Gtk.main_quit)
++
++    def key_pressed(_window, event):
++        """Escape closes the window: it has nothing to lose."""
++        if event.keyval == Gdk.KEY_Escape:
++            win.destroy()
++            return True
++        return False
++
++    win.connect("key-press-event", key_pressed)
++
++    outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
++    outer.set_border_width(24)
++    win.add(outer)
++
++    # Not selectable: GTK focuses the first focusable widget, and a selectable
++    # label would open with its whole text selected.
++    big = Gtk.Label()
++    big.set_xalign(0)
++    outer.pack_start(big, False, False, 0)
++
++    def show_greeting():
++        text = f"{greeting_text(user_greeting() or system)}, {name}!"
++        big.set_markup(f"<span size='xx-large' weight='bold'>{escape(text)}</span>")
++
++    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
++    label = Gtk.Label(label="_Greeting", use_underline=True)
++    combo = Gtk.ComboBoxText()
++    label.set_mnemonic_widget(combo)
++    # The first entry is the machine's greeting, stored as "no choice" (SET-8).
++    combo.append(DEFAULT_CHOICE, f"Default ({greeting_text(system)})")
++    for greeting, text in GREETINGS:
++        combo.append(greeting, text)
++    combo.set_active_id(user_greeting() or DEFAULT_CHOICE)
++    row.pack_start(label, False, False, 0)
++    row.pack_start(combo, False, False, 0)
++    outer.pack_start(row, False, False, 0)
++
++    problem = Gtk.Label(selectable=True, wrap=True)
++    problem.set_xalign(0)
++    problem.get_style_context().add_class("dim-label")
++    outer.pack_start(problem, False, False, 0)
++
++    def changed(box):
++        chosen = box.get_active_id()
++        try:
++            save_greeting(None if chosen == DEFAULT_CHOICE else chosen)
++        except OSError as error:
++            warn(f"{user_conf()}: {error}")
++            problem.set_text("Your greeting couldn't be saved. Check that your home "
++                             f"folder isn't full or read-only.\n{error}")
++            problem.show()
++            # Show what is really in use again, without saving it once more.
++            box.handler_block_by_func(changed)
++            box.set_active_id(user_greeting() or DEFAULT_CHOICE)
++            box.handler_unblock_by_func(changed)
++            return
++        problem.hide()
++        show_greeting()
++
++    combo.connect("changed", changed)
++
++    close = Gtk.Button.new_with_mnemonic("_Close")
++    close.connect("clicked", lambda _b: win.destroy())
++    close.set_halign(Gtk.Align.END)
++    outer.pack_end(close, False, False, 0)
++
++    show_greeting()
++    win.show_all()
++    problem.hide()
++    Gtk.main()
++    return 0
++
++
++# --- Commands ----------------------------------------------------------------
++
++def cmd_say(opts):
++    name = opts.name or getpass.getuser()
++    print(f"{greeting_text(current_greeting())}, {name}!")
++    return 0
++
++
++def cmd_show(_opts):
++    with single_instance() as first:
++        if not first:
++            print("Hello is already open.")
++            return 0
++        gtk = load_gtk()
++        if not gtk:
++            return 1
++        return window(*gtk)
++
++
++def cmd_list(_opts):
++    for greeting, text in GREETINGS:
++        print(f"{greeting}\t{text}")
++    return 0
++
++
++def cmd_current(_opts):
++    print(current_greeting())
++    return 0
++
++
++def cmd_set(opts):
++    try:
++        save_greeting(None if opts.value == DEFAULT_CHOICE else opts.value)
++    except OSError as error:
++        warn(f"can't save the greeting ({error})")
++        return 1
++    return 0
++
++
++def main(argv=None):
++    parser = argparse.ArgumentParser(prog=NAME, description="Say hello, with the greeting you choose.")
++    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
++    say = commands.add_parser("say", help="print the greeting")
++    say.add_argument("name", nargs="?", help="who to greet (default: you)")
++    say.set_defaults(func=cmd_say)
++    commands.add_parser("show", help="open the window").set_defaults(func=cmd_show)
++    greeting = commands.add_parser("greeting", help="the greeting in use").add_subparsers(
++        dest="action", metavar="ACTION", required=True)
++    greeting.add_parser("list", help="print the greetings: id, text").set_defaults(func=cmd_list)
++    greeting.add_parser("current", help="print the id of the greeting in use").set_defaults(func=cmd_current)
++    setter = greeting.add_parser("set", help="choose a greeting")
++    setter.add_argument("value", choices=[g for g, _text in GREETINGS] + [DEFAULT_CHOICE])
++    setter.set_defaults(func=cmd_set)
++    opts = parser.parse_args(argv)
++    if not getattr(opts, "func", None):
++        opts.func, opts.name = cmd_say, None
++    return opts.func(opts)
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/packages/flickos-hello/usr/share/applications/flickos-hello.desktop b/packages/flickos-hello/usr/share/applications/flickos-hello.desktop
+new file mode 100644
+index 0000000..29e006d
+--- /dev/null
++++ b/packages/flickos-hello/usr/share/applications/flickos-hello.desktop
+@@ -0,0 +1,10 @@
++[Desktop Entry]
++Type=Application
++Name=Hello
++Comment=Choose how the computer greets you
++Icon=face-smile
++Exec=flickos-hello show
++Terminal=false
++StartupNotify=false
++Categories=Utility;
++Keywords=greeting;hello;example;
+diff --git a/tools/boot-test.py b/tools/boot-test.py
+index 9442c15..a0d6d71 100755
+--- a/tools/boot-test.py
++++ b/tools/boot-test.py
+@@ -326,6 +326,20 @@ CHECKS = [
+      f" && ! grep -q 'custom/phone' {RUNTIME}/waybar/config.jsonc"
+      f" && ! test -e {RUNTIME}/bin/flickos-phone-on"
+      f" && tr '\\0' '\\n' < /proc/$(pgrep -o -u {LIVE_USER} -x labwc)/environ | grep -q '^PATH=.*/flickos/bin$'", 0),
++    # flickos-hello (a Recommends): the greeting is its setting. A change shows
++    # in Settings → History, whose undo runs flickos-hello again.
++    ("Hello installed, a greeting change shows in History and can be undone",
++     "test $(flickos-hello greeting current) = hello"
++     " && flickos-hello greeting set mabuhay && flickos-hello say Ana | grep -qx 'Mabuhay, Ana!'"
++     " && flickos-control history --days 1 | grep -q 'Greeting: Mabuhay (was the default)$'"
++     " && flickos-control history undo"
++     " $(flickos-control history --days 1 | awk -F'\\t' '/Greeting: Mabuhay/ { print $1; exit }')"
++     " && test $(flickos-hello greeting current) = hello", 0),
++    ("Hello window opens",
++     f"{SESSION_ENV} setsid -f flickos-hello show >/dev/null 2>&1; sleep 3"
++     f" && grep -q libgtk-3 /proc/$(pgrep -n -u {LIVE_USER} -x flickos-hello)/maps", 10, "hello-dark"),
++    ("close the Hello window",
++     f"pkill -u {LIVE_USER} -x flickos-hello; sleep 1; ! pgrep -u {LIVE_USER} -x flickos-hello", 10),
+     # The cards are filtered by what is installed and by whether welcome.conf
+     # gives the card's address, so the list is also a check on the conffile.
+     ("welcome window installed, cards match the conffile",
+-- 
+2.47.3
+

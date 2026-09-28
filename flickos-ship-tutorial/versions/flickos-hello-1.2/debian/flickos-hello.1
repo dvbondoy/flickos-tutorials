@@ -1,0 +1,33 @@
+.TH FLICKOS-HELLO 1 "2026-09-28" "flickos-hello 1.2" "FlickOS"
+.SH NAME
+flickos-hello \- say hello
+.SH SYNOPSIS
+.B flickos-hello
+.RB [ \-\-big ]
+.RI [ NAME ]
+.SH DESCRIPTION
+.B flickos-hello
+prints a greeting to
+.I NAME
+(your user name when it is left out).
+With
+.BR \-\-big ,
+it is printed in big letters by
+.BR figlet (6).
+It is the example package of FlickOS's tutorial on building a .deb.
+.SH FILES
+.TP
+.I /etc/xdg/flickos/hello.conf
+The greeting for every account:
+.B Greeting=
+in the
+.B [Hello]
+section.
+.TP
+.I ~/.config/flickos/hello
+Your own greeting, in the same format. It wins over the one above.
+.SH EXAMPLES
+.nf
+$ flickos-hello Ana
+Hello, Ana!
+.fi

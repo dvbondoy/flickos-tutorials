@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Hello
+Comment=Choose how the computer greets you
+Icon=face-smile
+Exec=flickos-hello show
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+Keywords=greeting;hello;example;

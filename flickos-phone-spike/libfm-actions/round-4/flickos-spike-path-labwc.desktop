@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Spike path-labwc
+Tooltip=Spike path-labwc
+Profiles=p;
+TryExec=labwc
+
+[X-Action-Profile p]
+MimeTypes=all/all;
+
+Exec=notify-send "Spike path-labwc" %f

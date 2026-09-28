@@ -1,0 +1,5 @@
+flickos-hello (1.0) trixie; urgency=medium
+
+  * First version: says hello.
+
+ -- Jon <dvbondoy@gmail.com>  Mon, 28 Sep 2026 00:03:18 +0800

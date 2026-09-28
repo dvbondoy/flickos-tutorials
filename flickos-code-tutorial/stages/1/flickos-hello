@@ -1,0 +1,72 @@
+#!/usr/bin/python3
+"""Hello: greets you with the greeting you choose. The example program of
+FlickOS's tutorial on writing a program (~/Documents/flickos-code-tutorial).
+
+It owns one setting, the greeting. The machine's default is in the conffile
+/etc/xdg/flickos/hello.conf ([Hello] Greeting=ID); a user's choice is in
+~/.config/flickos/hello, written only when they choose one, and wins. A file
+that can't be read, or a greeting this version doesn't know, is warned about
+and ignored, so the program always starts. A greeting may be written as its id
+(mabuhay) or its text (Mabuhay): hello.conf 1.x held the text.
+
+The window (show) is a plain GTK 3 window (python3-gi), so it follows the
+Arc-Dark or Arc theme of the chosen style, and it has no CSS of its own. GTK is
+imported only when the window opens, so the other commands work without a
+display. One window per session: a second show while it is open only says so
+(hello.lock in $XDG_RUNTIME_DIR/flickos). A greeting applies as soon as it is
+chosen; Escape or Close closes the window.
+
+Commands:
+  (none), say [NAME]      print the greeting to NAME (default: your user name)
+  show                    open the window
+  greeting list           print the greetings: id, text
+  greeting current        print the id of the greeting in use
+  greeting set ID|default choose a greeting (default: the machine's)
+
+Exit codes: 0 ok, 1 error, 2 usage error.
+"""
+
+import argparse
+import sys
+
+NAME = "flickos-hello"
+
+# The greetings, in the order they are listed: id (stored in the files, never
+# changed once shipped), text. Adding a greeting is adding a row.
+GREETINGS = [
+    ("hello", "Hello"),
+    ("hi", "Hi"),
+    ("mabuhay", "Mabuhay"),
+    ("howdy", "Howdy"),
+    ("good-day", "Good day"),
+]
+# When neither file sets one. The shipped hello.conf says the same (a test checks).
+DEFAULT_GREETING = "hello"
+
+
+def warn(message):
+    print(f"{NAME}: {message}", file=sys.stderr)
+
+
+# --- Commands ----------------------------------------------------------------
+
+def cmd_list(_opts):
+    for greeting, text in GREETINGS:
+        print(f"{greeting}\t{text}")
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog=NAME, description="Say hello, with the greeting you choose.")
+    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
+    greeting = commands.add_parser("greeting", help="the greeting in use").add_subparsers(
+        dest="action", metavar="ACTION", required=True)
+    greeting.add_parser("list", help="print the greetings: id, text").set_defaults(func=cmd_list)
+    opts = parser.parse_args(argv)
+    if not getattr(opts, "func", None):
+        parser.error("which command? (say comes in stage 2)")
+    return opts.func(opts)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

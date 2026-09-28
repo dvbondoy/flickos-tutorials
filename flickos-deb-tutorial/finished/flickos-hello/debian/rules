@@ -1,0 +1,11 @@
+#!/usr/bin/make -f
+
+# No bytecode (__pycache__) next to the files that get installed.
+export PYTHONDONTWRITEBYTECODE = 1
+
+%:
+	dh $@
+
+# Skipped with DEB_BUILD_OPTIONS=nocheck.
+override_dh_auto_test:
+	python3 -m unittest discover -s tests -v

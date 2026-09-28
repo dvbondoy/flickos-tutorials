@@ -1,0 +1,186 @@
+# Hello (flickos-hello)
+
+**Status:** Accepted, 2026-09-28. Phase 1 is done in flickos-hello 2.1 with
+flickos-control 1.20 and flickos-desktop 1.22. The package itself is described
+in [04](../04-packages.md#flickos-hello).
+
+This document records why Hello, FlickOS's example program, is built the way
+it is.
+
+- [1. Problem](#1-problem)
+- [2. Goals and non-goals](#2-goals-and-non-goals)
+- [3. Decisions (ADRs)](#3-decisions-adrs)
+- [4. Phases](#4-phases)
+- [5. Risks and open questions](#5-risks-and-open-questions)
+
+## 1. Problem
+
+A new FlickOS program starts as a copy of parts of the existing ones, and the
+HIG's Must rules are spread over ten pages. The small programs own no
+settings: flickos-welcome (433 lines) and flickos-shortcuts (634) only show
+things and run other programs. The ones that own settings are 1,300 to 6,500
+lines (flick-tiler, flickos-phone, flickos-layout, flickos-control), and there
+each part is mixed with the program's own job.
+
+So there is no one place that shows every part a FlickOS program has:
+
+- a setting with a system default and a user's choice
+  ([SET-4](../hig/03-settings-and-files.md#set-4-must-system-defaults-in-etcxdgflickos-user-choices-in-configflickos)),
+  changed on the command line first (SET-2);
+- a window that follows the style (WIN-1, VIS-2) and opens once (WIN-2);
+- its changes in *Settings → History* (SET-4);
+- a way to find it from Settings (INT-4);
+- tests that never touch the build host (PKG-8), and a boot-test check
+  (PKG-9).
+
+## 2. Goals and non-goals
+
+**Goals**
+- One program with each of those parts once, in the simplest form that
+  follows every Must rule. Under 500 lines.
+- A setting whose effect a user can see: the greeting it prints and shows.
+- Nothing runs until it is opened: no daemon, no autostart, nothing at login.
+
+**Non-goals**
+- Being useful beyond the example. No greeting at login (INT-8: nothing new
+  opens at first login), no panel button, no notifications.
+- Translations. The text follows TXT-8, so gettext can be added later.
+- A page of its own in Settings.
+
+## 3. Decisions (ADRs)
+
+### ADR-001: Its own package
+
+**Decision.** A new native package, `flickos-hello`: one Python 3 file, GTK 3
+through python3-gi for the window only.
+
+**Alternatives rejected.**
+- **A card in flickos-welcome:** Welcome owns no settings, and each card runs
+  the program that owns the job. A greeting setting would make it an owner.
+- **A demo page in flickos-control:** the Settings window is a view over the
+  owners ([flickos-control ADR-004](flickos-control.md#adr-004-cli-first-each-setting-has-one-owner)).
+  The example has to show the owner's side, where most of the rules apply.
+- **Only a document:** code in a document isn't built or tested, so nothing
+  notices when it falls behind the HIG. A package is built and tested on
+  every push.
+
+### ADR-002: The setting
+
+**Decision.** The greetings are a table, `GREETINGS` (id, text). The files
+store the id, and a shipped id is never renamed. The default for every
+account is the conffile `/etc/xdg/flickos/hello.conf` (`[Hello]
+Greeting=hello`), and a user's choice is `~/.config/flickos/hello`, written
+only by `greeting set`. `greeting set default` deletes it. Reading accepts
+an id or a text in any case, because version 1.x stored the text.
+
+**Why ids:** a text can change (a spelling, a translation), an id can't.
+
+### ADR-003: Found from Settings through a tile
+
+**Decision.** A *More Settings* tile, *Hello*, in flickos-control runs
+`flickos-hello show`. Like every tile, it is hidden while its app isn't
+installed. Search keywords: greeting and the greetings' words.
+
+**Alternatives rejected.**
+- **A row on a Settings page:** a page for one setting, and flickos-control
+  would have to read and change the greeting itself. INT-4 gives a tile for
+  a setting that another app owns in its own window.
+- **An entry in the labwc Settings menu too** (what docs/09 says to do with a
+  tile's app): that menu lists the system's settings apps, and Hello isn't
+  one. docs/09 changes to say so.
+
+### ADR-004: History
+
+**Decision.** `save_greeting()` records every change with `record()`, in the
+format every owner shares
+([History ADR-002](flickos-history.md#adr-002-one-append-only-file-in-xdg_state_homeflickos)):
+owner `flickos-hello`, key `greeting`, old and new an id or `default`.
+flickos-control learns the owner: the label *Greeting*, the greetings' names
+from `greeting list`, undo with `greeting set OLD`, and *Put Back as It Was*.
+
+**Why:** SET-4 is a Must. Every owner records its own changes, and
+flickos-control only reads them.
+
+**Cost:** flickos-control has to be released together with this package.
+
+### ADR-005: A Recommends of flickos-desktop
+
+**Decision.** A Recommends, not a Depends, and not in `REQUIRED`.
+
+- **Hello is an app users may remove** (PKG-4). With a Depends,
+  `apt remove flickos-hello` would also remove flickos-desktop, and
+  autoremove would then offer to remove the desktop.
+- **The cost:** a Recommends never reaches installed systems
+  (`00recommends`), so only new installs have it. Anyone else runs
+  `sudo apt install flickos-hello`.
+- **Not in `REQUIRED`:** the desktop works without it. The image still gets
+  it, because `0050-flickos-recommends` installs flickos-desktop's
+  Recommends.
+
+### ADR-006: Verification
+
+**Decision.**
+- **Unit tests** (PKG-8), run at package build: reading the files (defaults,
+  the user's choice wins, texts, unknown and broken values), the commands,
+  History, one window per session, no GTK for the commands, and the shipped
+  files. All of them use faked paths (`XDG_CONFIG_HOME`, `XDG_STATE_HOME`,
+  `SYSTEM_CONF`, `HISTORY_CONF`).
+- **flickos-control's tests:** the tile, History's words, undo, and a run of
+  the real `flickos-hello` next to it whose record flickos-control reads.
+- **Boot test** (PKG-9): change the greeting, find the change in History,
+  undo it, and check the greeting is back. Then open the window
+  (`hello-dark.png`) and close it.
+- **Measured** (PERF-7): a command's time, the window's first frame, and the
+  disk cost.
+
+## 4. Phases
+
+### Phase 0: No spike
+
+Nothing here is new to FlickOS. Every part comes from a program that already
+works: the setting from flick-tiler, the window from flickos-welcome, and
+History from flick-tiler's `record()`. A spike answers a question the repo
+can't, and there is none here. The version 2.0 already written outside the
+repo was measured in the headless harness on the dev host: `greeting list`
+takes 72 ms (budget 200 ms), and the window's first frame appears after
+570–680 ms (budget 1 s).
+
+### Phase 1: The package (done 2026-09-28)
+
+flickos-hello 2.1 (History), flickos-control 1.20 (the tile, the owner in
+History), flickos-desktop 1.22 (the Recommends), the boot-test checks and the
+docs. Measured on the dev host (i3):
+
+| What | Budget | Measured |
+|---|---|---|
+| `greeting list` | ≤ 200 ms | 76–79 ms (72 ms before History: `json` and `datetime` are imported now) |
+| `greeting set` (with the History record) | ≤ 200 ms | 79–81 ms |
+| The window's first frame (headless harness, FlickOS session) | ≤ 1 s | 540–570 ms |
+| Disk | | 35 KB installed, 8 KB download, no new dependencies in the image |
+| Idle | nothing | nothing runs until it is opened |
+
+- **Tests:** 25 in flickos-hello, and 4 new ones in flickos-control (326 in
+  all). No test reads or writes outside its temporary folders.
+- **The boot-test checks** passed in the FlickOS 2.1 live ISO with both new
+  packages installed from a local test repo. With only flickos-hello
+  installed, the History check fails, as it should: flickos-control 1.18
+  doesn't know the owner.
+- **Found while writing the tests:** the first version of the tests wrote to
+  the build host's `~/.local/state/flickos/history.jsonl` and read its
+  `/etc/xdg/flickos/history.conf`. `HomeTest` now fakes both.
+
+### Later
+
+- Translations, when FlickOS has any.
+- If new packages start as a copy of it: a `tools/new-package.sh NAME` that
+  copies it under a new name.
+
+## 5. Risks and open questions
+
+- **One more tile in everyone's Settings** for an example app. If that's too
+  much, drop the Recommends. The tile then shows only for those who install
+  Hello.
+- **Keyboard use is checked by hand only.** The headless harness can't send
+  GTK's key bindings (Tab, arrows, mnemonics).
+- **It has to keep up with the HIG.** When a rule changes, try the change on
+  Hello first.

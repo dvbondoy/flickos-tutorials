@@ -1,0 +1,48 @@
+# upgrade-test.txt: flickos-hello 1.0 → 1.1 → 1.2 in a fresh live VM, through
+# the local repo, as an installed FlickOS would get them with apt.
+#
+#   ./local-repo.sh init                   once
+#   ./local-repo.sh serve                  in a second terminal, leave it running
+#   ./vm-run.py --script upgrade-test.txt
+#
+# "host:" lines run on this computer; the others in the VM (see vm-run.py).
+
+# --- Start: the repo holds only 1.0 (a user who installed it last month) ---
+host: ./local-repo.sh remove flickos-hello >/dev/null 2>&1; ./local-repo.sh add debs/flickos-hello_1.0_all.deb
+
+# Trust the test repo: its key, then a source that names that key.
+curl -fsS http://10.0.2.2:8000/test-key.asc | sudo tee /etc/apt/keyrings/flickos-test.asc >/dev/null
+printf 'Types: deb\nURIs: http://10.0.2.2:8000\nSuites: trixie\nComponents: main\nSigned-By: /etc/apt/keyrings/flickos-test.asc\n' | sudo tee /etc/apt/sources.list.d/flickos-test.sources
+# The live ISO has no package lists: this reads Debian's, FlickOS's and the test repo's.
+sudo apt-get update -q
+apt-cache policy flickos-hello
+sudo apt-get install -q -y flickos-hello
+flickos-hello
+
+# The administrator changes the greeting (a conffile) …
+sudo sed -i 's/^Greeting=.*/Greeting=Hi/' /etc/xdg/flickos/hello.conf
+flickos-hello
+
+# --- 1.1 ships a new hello.conf ---
+host: ./local-repo.sh add debs/flickos-hello_1.1_all.deb
+sudo apt-get update -q
+apt list --upgradable 2>/dev/null | grep flickos-hello
+# --only-upgrade: this package only (the ISO is older than what is published,
+# so a plain "apt-get upgrade" would also bring everything else up to date).
+# No one can answer dpkg's conffile question here, so say beforehand: keep
+# the administrator's file when they changed it, else take the new one.
+# (Without these options dpkg stops: "end of file on stdin at conffile prompt".)
+sudo apt-get install -q --only-upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold flickos-hello
+flickos-hello
+ls /etc/xdg/flickos/ | grep hello
+
+# --- 1.2 needs a package that isn't installed (figlet) ---
+host: ./local-repo.sh add debs/flickos-hello_1.2_all.deb
+sudo apt-get update -q
+# apt-get upgrade never installs a new package, so it keeps 1.2 back
+# (-s: only simulate, and show just that part of its answer).
+apt-get -s upgrade | grep -A1 'kept back'
+# Upgrading the package by name brings its new dependency along.
+sudo apt-get install -q --only-upgrade -y flickos-hello
+dpkg-query -W flickos-hello figlet
+flickos-hello --big

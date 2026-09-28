@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Spike running-labwc
+Tooltip=Spike running-labwc
+Profiles=p;
+ShowIfRunning=labwc
+
+[X-Action-Profile p]
+MimeTypes=all/all;
+
+Exec=notify-send "Spike running-labwc" %f

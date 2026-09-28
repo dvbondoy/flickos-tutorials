@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Spike hidden-by-tryexec
+Tooltip=Spike hidden-by-tryexec
+Profiles=p;
+TryExec=/nonexistent/flickos-phone
+
+[X-Action-Profile p]
+MimeTypes=all/all;
+
+Exec=notify-send "Spike hidden-by-tryexec" %f

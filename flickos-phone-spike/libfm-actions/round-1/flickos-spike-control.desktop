@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Spike control
+Tooltip=Spike control
+Profiles=p;
+
+
+[X-Action-Profile p]
+MimeTypes=all/all;
+
+Exec=notify-send "Spike control" %f

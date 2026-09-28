@@ -1,0 +1,46 @@
+.TH FLICKOS-HELLO 1 "2026-09-28" "flickos-hello 2.0" "FlickOS"
+.SH NAME
+flickos-hello \- say hello, with the greeting you choose
+.SH SYNOPSIS
+.B flickos-hello
+.RB [ say
+.RI [ NAME ]]
+.br
+.B flickos-hello show
+.br
+.B flickos-hello greeting
+.BR list " | " current " | " set
+.IR ID | default
+.SH DESCRIPTION
+.B flickos-hello
+prints a greeting to
+.I NAME
+(your user name when it is left out).
+It is the example program of FlickOS's tutorial on writing a program.
+.TP
+.B show
+Open the Hello window, where the greeting can be chosen.
+.TP
+.B greeting list
+Print the greetings, one per line: id, a tab, the text.
+.TP
+.B greeting current
+Print the id of the greeting in use.
+.TP
+.BI "greeting set " ID
+Choose a greeting;
+.B default
+goes back to the computer's.
+.SH FILES
+.TP
+.I /etc/xdg/flickos/hello.conf
+The greeting for every account:
+.B Greeting=
+in the
+.B [Hello]
+section.
+.TP
+.I ~/.config/flickos/hello
+Your own choice, in the same format. It wins over the one above.
+.SH "EXIT STATUS"
+0 ok, 1 error, 2 usage error.

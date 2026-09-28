@@ -1,0 +1,3 @@
+usr/bin/flickos-hello                           usr/bin/
+etc/xdg/flickos/hello.conf                      etc/xdg/flickos/
+usr/share/applications/flickos-hello.desktop    usr/share/applications/

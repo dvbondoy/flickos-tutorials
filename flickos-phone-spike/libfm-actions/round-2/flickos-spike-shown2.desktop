@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Spike shown2
+Tooltip=Spike shown2
+Profiles=p;
+ShowIfTrue=/usr/bin/echo true
+
+[X-Action-Profile p]
+MimeTypes=all/all;
+
+Exec=notify-send "Spike shown2" %f

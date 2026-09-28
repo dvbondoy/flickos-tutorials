@@ -1,0 +1,18 @@
+Source: flickos-hello
+Section: utils
+Priority: optional
+Maintainer: Jon <dvbondoy@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               python3
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+
+Package: flickos-hello
+Architecture: all
+Depends: python3,
+         ${misc:Depends}
+Description: says hello (example package)
+ A tiny program that greets you, made as the example of FlickOS's
+ tutorial on building a .deb. It shows the usual parts of a package:
+ a program, a configuration file under /etc and unit tests that run
+ while the package builds.

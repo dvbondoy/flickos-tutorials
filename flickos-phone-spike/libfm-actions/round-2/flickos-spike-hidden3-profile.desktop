@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Spike hidden3-profile
+Tooltip=Spike hidden3-profile
+Profiles=p;
+
+
+[X-Action-Profile p]
+MimeTypes=all/all;
+ShowIfTrue=/usr/bin/echo false
+Exec=notify-send "Spike hidden3-profile" %f

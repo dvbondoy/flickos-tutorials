@@ -1,0 +1,14 @@
+flickos-hello (2.0) trixie; urgency=medium
+
+  * Rewritten the FlickOS way: greetings from a list (greeting
+    list|current|set ID|default), a user's own choice in
+    ~/.config/flickos/hello, and a window (show). hello.conf now holds a
+    greeting's id; the old text still works.
+
+ -- Jon <dvbondoy@gmail.com>  Mon, 28 Sep 2026 07:51:31 +0800
+
+flickos-hello (1.0) trixie; urgency=medium
+
+  * First version: says hello.
+
+ -- Jon <dvbondoy@gmail.com>  Mon, 28 Sep 2026 00:03:18 +0800

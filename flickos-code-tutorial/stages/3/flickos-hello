@@ -1,0 +1,193 @@
+#!/usr/bin/python3
+"""Hello: greets you with the greeting you choose. The example program of
+FlickOS's tutorial on writing a program (~/Documents/flickos-code-tutorial).
+
+It owns one setting, the greeting. The machine's default is in the conffile
+/etc/xdg/flickos/hello.conf ([Hello] Greeting=ID); a user's choice is in
+~/.config/flickos/hello, written only when they choose one, and wins. A file
+that can't be read, or a greeting this version doesn't know, is warned about
+and ignored, so the program always starts. A greeting may be written as its id
+(mabuhay) or its text (Mabuhay): hello.conf 1.x held the text.
+
+The window (show) is a plain GTK 3 window (python3-gi), so it follows the
+Arc-Dark or Arc theme of the chosen style, and it has no CSS of its own. GTK is
+imported only when the window opens, so the other commands work without a
+display. One window per session: a second show while it is open only says so
+(hello.lock in $XDG_RUNTIME_DIR/flickos). A greeting applies as soon as it is
+chosen; Escape or Close closes the window.
+
+Commands:
+  (none), say [NAME]      print the greeting to NAME (default: your user name)
+  show                    open the window
+  greeting list           print the greetings: id, text
+  greeting current        print the id of the greeting in use
+  greeting set ID|default choose a greeting (default: the machine's)
+
+Exit codes: 0 ok, 1 error, 2 usage error.
+"""
+
+import argparse
+import configparser
+import contextlib
+import getpass
+import os
+import sys
+import tempfile
+
+NAME = "flickos-hello"
+# Testing hook (unit tests): a root to read /etc below.
+PREFIX = os.environ.get("FLICKOS_HELLO_PREFIX", "")
+SYSTEM_CONF = PREFIX + "/etc/xdg/flickos/hello.conf"
+SECTION = "Hello"
+KEY = "Greeting"
+
+# The greetings, in the order they are listed: id (stored in the files, never
+# changed once shipped), text. Adding a greeting is adding a row.
+GREETINGS = [
+    ("hello", "Hello"),
+    ("hi", "Hi"),
+    ("mabuhay", "Mabuhay"),
+    ("howdy", "Howdy"),
+    ("good-day", "Good day"),
+]
+# When neither file sets one. The shipped hello.conf says the same (a test checks).
+DEFAULT_GREETING = "hello"
+
+
+def warn(message):
+    print(f"{NAME}: {message}", file=sys.stderr)
+
+
+# --- The setting -------------------------------------------------------------
+
+def config_home():
+    return os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+
+
+def user_conf():
+    return os.path.join(config_home(), "flickos", "hello")
+
+
+def read_ini(path):
+    """The [Hello] keys of an INI file (lower-case names). A missing file is
+    empty; a broken one is empty with a warning."""
+    ini = configparser.ConfigParser(interpolation=None)
+    try:
+        ini.read(path, encoding="utf-8")
+    except (configparser.Error, UnicodeDecodeError) as error:
+        # configparser's messages run over several lines; the first says it.
+        warn(f"{path}: can't read it, ignored ({str(error).splitlines()[0].rstrip('.')})")
+        return {}
+    return dict(ini[SECTION]) if ini.has_section(SECTION) else {}
+
+
+def greeting_id(value, path):
+    """The id for a Greeting= value, given as an id or a text, any case, or
+    None (with a warning) when this version doesn't know it."""
+    wanted = value.strip().lower()
+    for greeting, text in GREETINGS:
+        if wanted in (greeting, text.lower()):
+            return greeting
+    warn(f"{path}: unknown greeting '{value.strip()}', ignored")
+    return None
+
+
+def system_greeting():
+    """The machine's greeting: hello.conf's, else DEFAULT_GREETING. What
+    `greeting set default` goes back to."""
+    value = read_ini(SYSTEM_CONF).get(KEY.lower())
+    return (value is not None and greeting_id(value, SYSTEM_CONF)) or DEFAULT_GREETING
+
+
+def user_greeting():
+    """The user's own choice, or None."""
+    value = read_ini(user_conf()).get(KEY.lower())
+    return greeting_id(value, user_conf()) if value is not None else None
+
+
+def current_greeting():
+    return user_greeting() or system_greeting()
+
+
+def greeting_text(greeting):
+    return dict(GREETINGS)[greeting]
+
+
+def write_atomic(path, text):
+    """Write text to path through a temporary file in the same folder, so no
+    one ever reads half a file. Raises OSError."""
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def save_greeting(greeting):
+    """Store the user's choice; None removes it, so the machine's applies again.
+    The file goes away when nothing is left in it. Raises OSError."""
+    path = user_conf()
+    if greeting is None:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(path)
+        return
+    write_atomic(path, f"# Written by {NAME}. Change it with: {NAME} greeting set ID|default\n"
+                       f"[{SECTION}]\n{KEY}={greeting}\n")
+
+
+# --- Commands ----------------------------------------------------------------
+
+def cmd_say(opts):
+    name = opts.name or getpass.getuser()
+    print(f"{greeting_text(current_greeting())}, {name}!")
+    return 0
+
+
+def cmd_list(_opts):
+    for greeting, text in GREETINGS:
+        print(f"{greeting}\t{text}")
+    return 0
+
+
+def cmd_current(_opts):
+    print(current_greeting())
+    return 0
+
+
+def cmd_set(opts):
+    try:
+        save_greeting(None if opts.value == "default" else opts.value)
+    except OSError as error:
+        warn(f"can't save the greeting ({error})")
+        return 1
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog=NAME, description="Say hello, with the greeting you choose.")
+    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
+    say = commands.add_parser("say", help="print the greeting")
+    say.add_argument("name", nargs="?", help="who to greet (default: you)")
+    say.set_defaults(func=cmd_say)
+    greeting = commands.add_parser("greeting", help="the greeting in use").add_subparsers(
+        dest="action", metavar="ACTION", required=True)
+    greeting.add_parser("list", help="print the greetings: id, text").set_defaults(func=cmd_list)
+    greeting.add_parser("current", help="print the id of the greeting in use").set_defaults(func=cmd_current)
+    setter = greeting.add_parser("set", help="choose a greeting")
+    setter.add_argument("value", choices=[g for g, _text in GREETINGS] + ["default"])
+    setter.set_defaults(func=cmd_set)
+    opts = parser.parse_args(argv)
+    if not getattr(opts, "func", None):
+        opts.func, opts.name = cmd_say, None
+    return opts.func(opts)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

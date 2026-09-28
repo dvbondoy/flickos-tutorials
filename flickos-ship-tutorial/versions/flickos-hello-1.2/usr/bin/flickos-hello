@@ -1,0 +1,44 @@
+#!/usr/bin/python3
+"""flickos-hello: says hello. The example package of the .deb tutorial.
+
+    flickos-hello          Hello, jon!
+    flickos-hello Ana      Hello, Ana!
+    flickos-hello --big    the same in big letters (figlet)
+
+The greeting comes from /etc/xdg/flickos/hello.conf (the machine's) and then
+~/.config/flickos/hello (the user's own, which wins).
+"""
+import configparser
+import getpass
+import os
+import subprocess
+import sys
+
+SYSTEM_CONF = "/etc/xdg/flickos/hello.conf"
+DEFAULT_GREETING = "Hello"
+
+
+def user_conf():
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(config_home, "flickos", "hello")
+
+
+def greeting(files=None):
+    """The greeting of the last file that sets one, else DEFAULT_GREETING."""
+    parser = configparser.ConfigParser()
+    parser.read(files if files is not None else [SYSTEM_CONF, user_conf()])
+    return parser.get("Hello", "Greeting", fallback=DEFAULT_GREETING)
+
+
+def main(argv):
+    args = [a for a in argv[1:] if a != "--big"]
+    name = args[0] if args else getpass.getuser()
+    text = f"{greeting()}, {name}!"
+    if "--big" in argv[1:]:
+        return subprocess.run(["figlet", text]).returncode
+    print(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

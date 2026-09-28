@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Spike running-nothere
+Tooltip=Spike running-nothere
+Profiles=p;
+ShowIfRunning=flickos-nothere
+
+[X-Action-Profile p]
+MimeTypes=all/all;
+
+Exec=notify-send "Spike running-nothere" %f

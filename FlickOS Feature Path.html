@@ -1,0 +1,556 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>FlickOS Feature Path</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;700&family=Noto+Sans+Mono:wght@400;500&display=swap">
+<style>
+  /* Arc's light colors (FlickOS's Light style) by default, Arc-Dark for dark. */
+  :root {
+    --bg: #f5f6f7;
+    --surface: #ffffff;
+    --surface-2: #eef0f2;
+    --line: #dcdfe3;
+    --text: #444a58;
+    --text-strong: #2b2f38;
+    --muted: #69707e;
+    --accent: #3b7bd1;
+    --accent-soft: #e1ecfa;
+    --done: #3f8f5a;
+    --done-soft: #e2f1e7;
+    --warn: #a0620e;
+    --warn-soft: #fbeedb;
+    --mono: "Noto Sans Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+    --sans: "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #2f343f;
+      --surface: #383c4a;
+      --surface-2: #404552;
+      --line: #4b5162;
+      --text: #d3dae3;
+      --text-strong: #eef1f5;
+      --muted: #9aa3b2;
+      --accent: #5294e2;
+      --accent-soft: #34435c;
+      --done: #6cc38a;
+      --done-soft: #33483e;
+      --warn: #e7a74a;
+      --warn-soft: #4d4232;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #2f343f;
+    --surface: #383c4a;
+    --surface-2: #404552;
+    --line: #4b5162;
+    --text: #d3dae3;
+    --text-strong: #eef1f5;
+    --muted: #9aa3b2;
+    --accent: #5294e2;
+    --accent-soft: #34435c;
+    --done: #6cc38a;
+    --done-soft: #33483e;
+    --warn: #e7a74a;
+    --warn-soft: #4d4232;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 var(--sans);
+    padding: 0 16px;
+  }
+  .page { max-width: 980px; margin: 0 auto; padding-block: 36px 64px; display: grid; gap: 40px; }
+  h1, h2, h3 { color: var(--text-strong); text-wrap: balance; margin: 0; }
+  h1 { font-size: 30px; line-height: 1.2; font-weight: 700; }
+  h2 { font-size: 20px; font-weight: 700; }
+  h3 { font-size: 16px; font-weight: 700; }
+  p { margin: 0; max-width: 68ch; }
+  code, .path { font-family: var(--mono); font-size: 13px; }
+  code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; color: var(--text-strong); }
+  .label {
+    font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted);
+  }
+  header { display: grid; gap: 12px; }
+  header p { color: var(--muted); }
+
+  /* Tracker bar */
+  .tracker {
+    display: grid; gap: 12px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px;
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  }
+  .tracker-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  select, input[type="text"] {
+    font: inherit; color: var(--text-strong); background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-width: 0;
+  }
+  select { max-width: 100%; }
+  input[type="text"] { flex: 1 1 200px; }
+  button {
+    font: inherit; font-weight: 500; cursor: pointer; border-radius: 6px; padding: 6px 12px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--text-strong);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.quiet { background: transparent; }
+  button.danger { color: #fff; background: #c4453c; border-color: #c4453c; }
+  button:disabled { opacity: .5; cursor: default; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .progress { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .bar { flex: 1 1 200px; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+  .bar span { display: block; height: 100%; width: 0; background: var(--done); transition: width .25s; }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13.5px; }
+  .note { font-size: 13.5px; color: var(--muted); }
+  .error { font-size: 13.5px; color: var(--warn); }
+
+  /* Stages */
+  .phase { display: grid; gap: 14px; }
+  .phase-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .phase-head p { color: var(--muted); font-size: 14px; }
+  .stages { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+  .stage {
+    display: grid; grid-template-columns: 44px 1fr; gap: 14px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px;
+  }
+  .stage.is-done { border-color: var(--done); }
+  .num {
+    width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+    font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); background: var(--accent-soft);
+  }
+  .stage.is-done .num { color: var(--done); background: var(--done-soft); }
+  .stage-body { display: grid; gap: 10px; min-width: 0; }
+  .stage-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; flex-wrap: wrap; }
+  .tick { display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--muted); cursor: pointer; }
+  .tick input { width: 18px; height: 18px; accent-color: var(--done); margin: 0; }
+  .facts { display: grid; grid-template-columns: 110px 1fr; gap: 6px 14px; font-size: 14px; }
+  .facts dt { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding-top: 2px; }
+  .facts dd { margin: 0; min-width: 0; }
+  .where { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+  .where span { white-space: nowrap; }
+  .where b { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--accent); }
+  .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tools code { font-size: 12.5px; }
+  .done-when { color: var(--text-strong); }
+  .flag { display: inline-block; font-size: 11.5px; font-weight: 700; color: var(--warn); background: var(--warn-soft); padding: 1px 7px; border-radius: 10px; margin-left: 6px; vertical-align: 1px; }
+
+  /* Tables */
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); }
+  td:first-child { color: var(--text-strong); font-weight: 500; }
+  section { display: grid; gap: 14px; }
+
+  .gates { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; list-style: none; margin: 0; padding: 0; }
+  .gates li { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 8px; padding: 12px 14px; font-size: 14px; }
+  .gates b { color: var(--text-strong); display: block; margin-bottom: 2px; }
+
+  .tuts { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+  .tuts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+  .tuts .path { color: var(--text-strong); overflow-wrap: anywhere; }
+  .tuts p { grid-column: 1 / -1; font-size: 13.5px; color: var(--muted); }
+  .copy { font-size: 12.5px; padding: 3px 10px; }
+
+  @media (max-width: 560px) {
+    .tracker { position: static; }
+    .stage { grid-template-columns: 1fr; }
+    .facts { grid-template-columns: 1fr; gap: 2px; }
+    .facts dd { margin-bottom: 8px; }
+    h1 { font-size: 25px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .bar span { transition: none; } }
+</style>
+
+<div class="page">
+  <header>
+    <span class="label">FlickOS · from idea to release</span>
+    <h1>FlickOS Feature Path</h1>
+    <p>The thirteen stages a FlickOS feature goes through, in the order you do them, and where each one is taught. The tutorials live in <code>~/Documents</code>; section and step numbers point into their READMEs. Each stage says when it's done, so you know when you can move on.</p>
+  </header>
+
+  <div class="tracker" id="tracker" aria-label="Feature progress">
+    <div class="tracker-row">
+      <label class="label" for="feature">Tracking</label>
+      <select id="feature" disabled><option value="">No features yet</option></select>
+      <button class="quiet" id="remove" type="button" disabled>Remove…</button>
+      <span id="confirm" hidden>
+        <span class="note" id="confirm-text"></span>
+        <button class="danger" id="confirm-yes" type="button">Remove</button>
+        <button id="confirm-no" type="button">Cancel</button>
+      </span>
+    </div>
+    <form class="tracker-row" id="add-form">
+      <input type="text" id="new-name" maxlength="80" placeholder="A feature you're working on, e.g. Quick Settings" aria-label="Feature name" disabled>
+      <button class="primary" id="add" type="submit" disabled>Track Feature</button>
+    </form>
+    <div class="progress" id="progress" hidden>
+      <div class="bar" aria-hidden="true"><span id="bar"></span></div>
+      <span class="count" id="count"></span>
+    </div>
+    <p class="note" id="status">Connecting to this page's storage…</p>
+  </div>
+
+  <div id="phases"></div>
+
+  <section>
+    <h2>Decisions along the way</h2>
+    <p>Each one is made in a design doc ADR, with its reason. The rule is the HIG's; the last column is where a tutorial works through it.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Decision</th><th>How to decide</th><th>Rule</th><th>Shown in</th></tr></thead>
+        <tbody>
+          <tr><td>Does it need a spike?</td><td>Only if a question can't be answered from the repo or Debian. If every part already works in another FlickOS program, write "no spike" and why.</td><td>—</td><td>snip-spike §0 · repo §2</td></tr>
+          <tr><td>Its own package, or part of one?</td><td>Each setting has one owner. A view (Settings, Welcome) runs owners; it never becomes one.</td><td>SET-1</td><td>repo §2 (ADR-001)</td></tr>
+          <tr><td>On or off by default?</td><td>Off. Nothing runs, is generated or is bound while off. Only an ADR that states the cost makes it the default.</td><td>INT-9</td><td>code §0</td></tr>
+          <tr><td>Depends or Recommends?</td><td>Depends: the desktop breaks without it, and it reaches installed systems. Recommends: an app users may remove, new installs only. Try <code>apt-get -s remove PKG</code>.</td><td>PKG-4</td><td>repo §3</td></tr>
+          <tr><td>Which other packages change?</td><td>A setting needs a Settings row or tile (flickos-control), History (flickos-control), maybe autostart (flickos-settings), both menus, and flickos-desktop's bump.</td><td>INT-4 · SET-4 · PKG-3</td><td>repo §6–7</td></tr>
+          <tr><td>A daemon?</td><td>Only when a measured time budget needs one, signalled with <code>pkill</code>, and nothing while off.</td><td>PERF-6</td><td>—</td></tr>
+          <tr><td>Which version number?</td><td><code>dch -i</code> for a change; <code>dch -v 2.0</code> when a stored value changes meaning.</td><td>PKG-3</td><td>code §11</td></tr>
+          <tr><td>Publish now?</td><td>Only when the phase is complete for users. Code can sit in the repo until then ("not to be published before phase 2's Phone page").</td><td>INT-4</td><td>repo §15</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Gates you never skip</h2>
+    <ul class="gates">
+      <li><b>A new version for every content change</b><code>dch -i -D trixie "…"</code>, never by hand, never UNRELEASED. Check <code>repo/public/pool</code> first: a published version is frozen.</li>
+      <li><b>Tests never touch the host</b>Fake every path the program uses. Run <code>leak-check.py</code> whenever it reads or writes somewhere new.</li>
+      <li><b>Cross-package tests run in the tree</b><code>packages/build.sh</code> builds packages alone and skips them. Run the tests in <code>packages/NAME</code> after changing either side.</li>
+      <li><b>Kill by PID on your own desktop</b>Your computer runs a live FlickOS session. <code>pkill -x</code> by name hits your own programs.</li>
+      <li><b>Boot-test checks run in the VM</b>They change settings and close programs by name. Make sure each one fails against the old version.</li>
+      <li><b>Upgrade test before publishing</b>Old version to new through apt: conffiles, Breaks, a new Depends, nothing kept back by surprise.</li>
+      <li><b>Recommends never reach installs</b>A new Recommends is for new installs only. Anything installed systems must get is a Depends.</li>
+      <li><b>Read git status before committing</b>Anything you didn't mean to change shows up there: build output, <code>__pycache__</code>, an experiment.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>The tutorials</h2>
+    <ul class="tuts" id="tuts"></ul>
+  </section>
+</div>
+
+<script>
+  // Stage content. "where" entries are [tutorial folder, sections]; the
+  // folders are under ~/Documents.
+  const PHASES = [
+    { name: "Think", text: "Decide what to build before building it." },
+    { name: "Build", text: "The program, its package, and proof that it works." },
+    { name: "Integrate", text: "Everything else in the repo that has to know about it." },
+    { name: "Ship", text: "From the repo to installed systems and the next ISO." },
+  ];
+  const STAGES = [
+    { phase: 0, title: "Idea and questions",
+      what: "Write down what the feature is for and the questions whose answers could kill or reshape it, each with why it matters.",
+      where: [["flickos-snip-spike", "§0–1"], ["flickos-spike-kit", "process 1–2"]],
+      tools: ["results.md"],
+      done: "Every question says what in the design changes with its answer. The riskiest one is first." },
+    { phase: 0, title: "Spike (phase 0)",
+      what: "Prove the risky parts on your real machine and measure what they cost, with as little code as possible.",
+      where: [["flickos-snip-spike", "§2–11"], ["flickos-spike-kit", "process 3–10"], ["flickos-phone-spike", "§0–10"]],
+      tools: ["check-machine.sh", "try-unpacked.sh", "run-measured.sh", "tools/package-cost.py", "tools/measure.py"],
+      done: "Every question answered with a measurement or a no, decided in one sentence with its numbers, and cleaned up." },
+    { phase: 0, title: "Design doc",
+      what: "docs/design/NAME.md: problem, goals and non-goals, one ADR per decision with rejected alternatives, phases, risks.",
+      where: [["flickos-repo-tutorial", "§2, §4"], ["flickos-spike-kit", "process 11"], ["flickos-snip-spike", "§12"]],
+      tools: ["docs/design/flickos-menu.md", "git commit"],
+      done: "Status Proposed, phase 0's results in it, committed on its own." },
+    { phase: 0, title: "HIG review of the design",
+      what: "Go through the checklist's Must rules and settle each one in the design while it's still a paragraph to change.",
+      where: [["flickos-repo-tutorial", "§3"]],
+      tools: ["docs/hig/checklist.md"],
+      done: "Every Must rule either passes or has an ADR, and a doc that disagrees with a decision is changed in the same commit." },
+    { phase: 1, title: "Code and unit tests",
+      what: "One Python file: the docstring and tables first, the command line before any window, GTK loaded late, tests with faked paths.",
+      where: [["flickos-code-tutorial", "§0–10"]],
+      tools: ["python3 -B -m unittest", "leak-check.py", "first-frame.py"],
+      done: "Tests pass, leak-check touches nothing, commands under 200 ms and a window under 1 s." },
+    { phase: 1, title: "The package",
+      what: "debian/ with control (a comment on every dependency), changelog, copyright, install, rules, source/format.",
+      where: [["flickos-deb-tutorial", "§0–21"], ["flickos-code-tutorial", "§11"]],
+      tools: ["dch -i -D trixie", "build-and-check.sh", "lintian"],
+      done: "It builds from a copy, the tests run inside the build, and lintian reports no errors." },
+    { phase: 1, title: "Test at four levels",
+      what: "Your own desktop for the feel, the headless harness for repeatable runs and first login, the live ISO in QEMU for a clean system, the boot test for CI.",
+      where: [["flickos-headless-labwc", "§0–9"], ["flickos-ship-tutorial", "§2–3"], ["flickos-repo-tutorial", "§8, §10"]],
+      tools: ["start.sh · run.sh · shot.sh", "tools/test-iso.sh", "tools/boot-test.py", "vm-run.py", "try-checks.py"],
+      done: "It works in the live ISO, and its boot-test check passes there and fails against the old version." },
+    { phase: 2, title: "Wire it in",
+      what: "flickos-desktop's Depends or Recommends, REQUIRED if it's a must-have, Settings (tile or row), History, autostart, both menus, boot-test CHECKS.",
+      where: [["flickos-repo-tutorial", "§5–9"]],
+      tools: ["check-wiring.py", "packages/build.sh", "tools/check-menus.py", "tools/check-palette.py"],
+      done: "check-wiring.py has no MISSING lines, and packages/build.sh exits 0." },
+    { phase: 2, title: "Document it",
+      what: "A docs/04 section, a docs/01 row and tree line, a CLAUDE.md paragraph, and the design doc accepted with its measurements.",
+      where: [["flickos-repo-tutorial", "§11"]],
+      tools: ["check-wiring.py"],
+      done: "Someone who reads only CLAUDE.md wouldn't undo one of your decisions by mistake." },
+    { phase: 2, title: "Commit and push",
+      what: "One commit per phase with one bullet per package version, then push. CI builds the ISO and runs the full boot test.",
+      where: [["flickos-repo-tutorial", "§12, §15"]],
+      tools: ["git status", "git diff --cached", "git commit"],
+      done: "CI is green, and its screenshots of your window look right." },
+    { phase: 3, title: "Upgrade test",
+      what: "An installed system with the published version upgrades to yours through apt, from a local test repo.",
+      where: [["flickos-ship-tutorial", "§4–12"]],
+      tools: ["local-repo.sh", "vm-run.py", "upgrade-test.txt", "qemu-img snapshot"],
+      done: "Conffiles, Breaks and new Depends behave, and nothing is kept back that shouldn't be." },
+    { phase: 3, title: "Publish",
+      what: "Add the new versions to the signed apt repo and push it to GitHub Pages, so installed systems get them.",
+      where: [["flickos-ship-tutorial", "§5, §13"]],
+      tools: ["repo/publish.sh", "repo/upload.sh"],
+      done: "The published InRelease lists the new versions, and a VM on the real repo upgrades to them." },
+    { phase: 3, title: "Release the ISO", flag: "explained, not practised",
+      what: "Bump FLICKOS_VERSION, build with --purge, tag vX.Y; CI builds again and uploads to SourceForge.",
+      where: [["flickos-ship-tutorial", "§14"]],
+      tools: ["tools/release.sh X.Y", "tools/build-iso.sh --purge", "git tag -a vX.Y"],
+      done: "The GitHub release has SHA256SUMS and the ISO is on SourceForge." },
+  ];
+  const TUTORIALS = [
+    ["flickos-snip-spike", "A spike from questions to a design, with every tool explained (screenshots and recording)."],
+    ["flickos-spike-kit", "The process and scripts to start a new spike from."],
+    ["flickos-phone-spike", "The KDE Connect spike, told after the fact: reading source, loopback first, a real phone."],
+    ["flickos-code-tutorial", "Writing flickos-hello 2.0 the FlickOS way in four stages, with leak-check.py."],
+    ["flickos-deb-tutorial", "Making a .deb by hand and with debhelper, lintian, conffiles, upgrades."],
+    ["flickos-headless-labwc", "An isolated labwc on your desktop for repeatable window tests."],
+    ["flickos-ship-tutorial", "QEMU, the boot test, a signed local apt repo, upgrade tests, publishing and releasing."],
+    ["flickos-repo-tutorial", "The design doc, the HIG review, wiring into the repo, docs and commits, in a practice clone."],
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function renderStages() {
+    let n = 0;
+    $("phases").innerHTML = PHASES.map((phase, p) => {
+      const items = STAGES.map((s, i) => [s, i]).filter(([s]) => s.phase === p).map(([s, i]) => {
+        n = i + 1;
+        return `<li class="stage" id="stage-${n}" data-stage="${n}">
+          <div class="num" aria-hidden="true">${n}</div>
+          <div class="stage-body">
+            <div class="stage-top">
+              <h3>${n}. ${esc(s.title)}${s.flag ? `<span class="flag">${esc(s.flag)}</span>` : ""}</h3>
+              <label class="tick" hidden><input type="checkbox" id="tick-${n}" data-stage="${n}"> Done</label>
+            </div>
+            <p>${esc(s.what)}</p>
+            <dl class="facts">
+              <dt>Taught in</dt><dd class="where">${s.where.map(([t, sec]) => `<span><b>${esc(t)}</b> ${esc(sec)}</span>`).join("")}</dd>
+              <dt>Tools</dt><dd class="tools">${s.tools.map((t) => `<code>${esc(t)}</code>`).join("")}</dd>
+              <dt>Done when</dt><dd class="done-when">${esc(s.done)}</dd>
+            </dl>
+          </div>
+        </li>`;
+      }).join("");
+      return `<section class="phase">
+        <div class="phase-head"><h2>${esc(phase.name)}</h2><p>${esc(phase.text)}</p></div>
+        <ol class="stages">${items}</ol>
+      </section>`;
+    }).join("");
+  }
+
+  function renderTutorials() {
+    $("tuts").innerHTML = TUTORIALS.map(([dir, text]) => {
+      const path = `~/Documents/${dir}`;
+      return `<li><span class="path">${esc(path)}/README.md</span>
+        <button class="copy" type="button" data-copy="${esc(path)}">Copy Path</button>
+        <p>${esc(text)}</p></li>`;
+    }).join("");
+    $("tuts").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-copy]");
+      if (!button) return;
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy);
+        button.textContent = "Copied";
+      } catch {
+        const range = document.createRange();
+        range.selectNodeContents(button.previousElementSibling);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        button.textContent = "Selected";
+      }
+      setTimeout(() => { button.textContent = "Copy Path"; }, 1500);
+    });
+  }
+
+  // --- Tracking: features/<id> = {name, done: [stage numbers], created} ----
+  let db = null;
+  let features = [];              // [{id, name, done, created}]
+  let current = "";               // selected feature id
+  let writing = false;
+  let message = { text: "Connecting to this page's storage…", error: false };   // null: nothing to say
+
+  function remembered() {
+    try { return localStorage.getItem("feature") || ""; } catch { return ""; }
+  }
+  function remember(id) {
+    try { localStorage.setItem("feature", id); } catch { /* no storage: fine */ }
+  }
+
+  function setStatus(text, isError) {
+    message = text ? { text, error: Boolean(isError) } : null;
+    renderStatus();
+  }
+
+  function renderStatus() {
+    const shown = message || (db && !features.length
+      ? { text: "Name a feature to tick off its stages here. Ticks are kept with this page.", error: false }
+      : null);
+    $("status").textContent = shown ? shown.text : "";
+    $("status").className = shown && shown.error ? "error" : "note";
+    $("status").hidden = !shown;
+  }
+
+  function renderTracker() {
+    const select = $("feature");
+    select.innerHTML = features.length
+      ? features.map((f) => `<option value="${esc(f.id)}">${esc(f.name)}</option>`).join("")
+      : `<option value="">No features yet</option>`;
+    if (!features.some((f) => f.id === current)) current = features[0]?.id || "";
+    select.value = current;
+    select.disabled = !features.length;
+    $("remove").disabled = !current || writing;
+    const feature = features.find((f) => f.id === current);
+    const done = new Set(feature ? feature.done : []);
+    document.querySelectorAll(".tick").forEach((label) => { label.hidden = !feature; });
+    document.querySelectorAll(".stage").forEach((el) => {
+      const n = Number(el.dataset.stage);
+      const box = $(`tick-${n}`);
+      box.checked = done.has(n);
+      box.disabled = writing;
+      el.classList.toggle("is-done", Boolean(feature) && done.has(n));
+    });
+    $("progress").hidden = !feature;
+    if (feature) {
+      $("bar").style.width = `${(done.size / STAGES.length) * 100}%`;
+      const next = STAGES.findIndex((_, i) => !done.has(i + 1));
+      $("count").textContent = `${done.size} of ${STAGES.length} stages done` +
+        (next >= 0 ? ` · next: ${next + 1}. ${STAGES[next].title}` : " · shipped");
+    }
+    renderStatus();
+  }
+
+  async function toggle(n, on) {
+    const feature = features.find((f) => f.id === current);
+    if (!feature || writing) return;
+    const done = new Set(feature.done);
+    on ? done.add(n) : done.delete(n);
+    message = null;
+    writing = true;
+    renderTracker();
+    try {
+      await db.doc(`features/${feature.id}`).update({ done: [...done].sort((a, b) => a - b) });
+    } catch (error) {
+      setStatus("That tick wasn't saved. Try again in a moment.", true);
+    } finally {
+      writing = false;
+      renderTracker();
+    }
+  }
+
+  async function addFeature(name) {
+    message = null;
+    writing = true;
+    renderTracker();
+    try {
+      const ref = await db.collection("features").add({ name, done: [], created: new Date().toISOString() });
+      current = ref.id;
+      remember(current);
+      $("new-name").value = "";
+    } catch (error) {
+      setStatus(error && error.code === "quota_exceeded"
+        ? "No room for another feature. Remove one you've finished first."
+        : "The feature wasn't added. Try again in a moment.", true);
+    } finally {
+      writing = false;
+      renderTracker();
+    }
+  }
+
+  async function removeFeature() {
+    const feature = features.find((f) => f.id === current);
+    $("confirm").hidden = true;
+    if (!feature) return;
+    message = null;
+    writing = true;
+    renderTracker();
+    try {
+      await db.doc(`features/${feature.id}`).delete();
+      current = "";
+    } catch (error) {
+      setStatus("It wasn't removed. Try again in a moment.", true);
+    } finally {
+      writing = false;
+      renderTracker();
+    }
+  }
+
+  function wireTracker() {
+    $("feature").addEventListener("change", (event) => {
+      current = event.target.value;
+      remember(current);
+      $("confirm").hidden = true;
+      renderTracker();
+    });
+    $("phases").addEventListener("change", (event) => {
+      const box = event.target.closest("input[type=checkbox][data-stage]");
+      if (box) toggle(Number(box.dataset.stage), box.checked);
+    });
+    $("add-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const name = $("new-name").value.trim();
+      if (name && db && !writing) addFeature(name);
+    });
+    $("remove").addEventListener("click", () => {
+      const feature = features.find((f) => f.id === current);
+      if (!feature) return;
+      $("confirm-text").textContent = `Remove “${feature.name}” and its ticks?`;
+      $("confirm").hidden = false;
+      $("confirm-no").focus();
+    });
+    $("confirm-no").addEventListener("click", () => { $("confirm").hidden = true; });
+    $("confirm-yes").addEventListener("click", removeFeature);
+  }
+
+  async function startTracking() {
+    db = window.claude && window.claude.use ? await window.claude.use("db") : null;
+    if (!db) {
+      setStatus("Ticking off stages isn't available in this view. The map itself is all here.");
+      return;
+    }
+    current = remembered();
+    $("new-name").disabled = false;
+    $("add").disabled = false;
+    setStatus("Loading your features…");
+    db.collection("features").orderBy("created").onSnapshot((snap) => {
+      features = snap.docs.filter((d) => d.exists).map((d) => {
+        const body = d.data() || {};
+        return {
+          id: d.id,
+          name: typeof body.name === "string" && body.name ? body.name : "Unnamed feature",
+          done: Array.isArray(body.done) ? body.done.filter((n) => Number.isInteger(n) && n >= 1 && n <= STAGES.length) : [],
+          created: body.created || "",
+        };
+      });
+      if (message && !message.error) message = null;     // "Loading…" is over
+      renderTracker();
+    }, () => {
+      setStatus("Your features can't be loaded right now. Reload the page to try again.", true);
+    });
+  }
+
+  renderStages();
+  renderTutorials();
+  wireTracker();
+  renderTracker();
+  startTracking();
+</script>
+
+</body></html>

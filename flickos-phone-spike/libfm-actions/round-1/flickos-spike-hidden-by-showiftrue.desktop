@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Spike hidden-by-showiftrue
+Tooltip=Spike hidden-by-showiftrue
+Profiles=p;
+ShowIfTrue=sh -c "echo false"
+
+[X-Action-Profile p]
+MimeTypes=all/all;
+
+Exec=notify-send "Spike hidden-by-showiftrue" %f
