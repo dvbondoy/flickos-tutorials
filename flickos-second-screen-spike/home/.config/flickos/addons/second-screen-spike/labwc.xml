@@ -1,0 +1,6 @@
+<labwc_config>
+  <keyboard>
+    <keybind key="XF86Launch8"><action name="VirtualOutputAdd" output_name="HEADLESS-PHONE"/></keybind>
+    <keybind key="XF86Launch9"><action name="VirtualOutputRemove" output_name="HEADLESS-PHONE"/></keybind>
+  </keyboard>
+</labwc_config>

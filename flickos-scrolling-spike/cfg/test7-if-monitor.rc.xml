@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<labwc_config>
+  <core><gap>0</gap></core>
+  <regions>
+    <region name="L8" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L7" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L6" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L5" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L4" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L3" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L2" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L1" x="0%" y="100%" width="45%" height="100%" />
+    <region name="V0" x="0%" y="0%" width="45%" height="100%" />
+    <region name="V1" x="45%" y="0%" width="45%" height="100%" />
+    <region name="P" x="90%" y="0%" width="45%" height="100%" />
+    <region name="R1" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R2" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R3" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R4" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R5" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R6" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R7" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R8" x="0%" y="100%" width="45%" height="100%" />
+  </regions>
+  <windowRules>
+    <windowRule identifier="s1"><action name="SnapToRegion" region="V0" /></windowRule>
+    <windowRule identifier="s2"><action name="SnapToRegion" region="V1" /></windowRule>
+    <windowRule identifier="s3"><action name="SnapToRegion" region="P" /></windowRule>
+    <windowRule identifier="s4"><action name="SnapToRegion" region="R1" /></windowRule>
+    <windowRule identifier="s5"><action name="SnapToRegion" region="R2" /></windowRule>
+    <windowRule identifier="s6"><action name="SnapToRegion" region="R3" /></windowRule>
+    <windowRule identifier="t1"><action name="MoveToOutput" output="HEADLESS-1" /><action name="SnapToRegion" region="V0" /></windowRule>
+    <windowRule identifier="t2"><action name="MoveToOutput" output="HEADLESS-1" /><action name="SnapToRegion" region="V1" /></windowRule>
+    <windowRule identifier="t3"><action name="MoveToOutput" output="HEADLESS-1" /><action name="SnapToRegion" region="P" /></windowRule>
+  </windowRules>
+  <keyboard>
+    <keybind key="XF86Launch5">
+      <action name="If"><query monitor="HEADLESS-1" /><then><action name="ForEach"><query tiled_region="L7" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L8" /></then></action>
+      <action name="ForEach"><query tiled_region="L6" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L7" /></then></action>
+      <action name="ForEach"><query tiled_region="L5" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L6" /></then></action>
+      <action name="ForEach"><query tiled_region="L4" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L5" /></then></action>
+      <action name="ForEach"><query tiled_region="L3" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L4" /></then></action>
+      <action name="ForEach"><query tiled_region="L2" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L3" /></then></action>
+      <action name="ForEach"><query tiled_region="L1" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L2" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L1" /></then></action>
+      <action name="ForEach"><query tiled_region="V1" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="V0" /></then></action>
+      <action name="ForEach"><query tiled_region="P" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="V1" /></then></action>
+      <action name="ForEach"><query tiled_region="R1" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="P" /></then></action>
+      <action name="ForEach"><query tiled_region="R2" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R1" /></then></action>
+      <action name="ForEach"><query tiled_region="R3" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R2" /></then></action>
+      <action name="ForEach"><query tiled_region="R4" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R3" /></then></action>
+      <action name="ForEach"><query tiled_region="R5" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R4" /></then></action>
+      <action name="ForEach"><query tiled_region="R6" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R5" /></then></action>
+      <action name="ForEach"><query tiled_region="R7" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R6" /></then></action>
+      <action name="ForEach"><query tiled_region="R8" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R7" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" monitor="HEADLESS-1" /><then><action name="Focus" /><action name="Raise" /></then></action></then></action>
+      <action name="If"><query monitor="HEADLESS-2" /><then><action name="ForEach"><query tiled_region="L7" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="L8" /></then></action>
+      <action name="ForEach"><query tiled_region="L6" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="L7" /></then></action>
+      <action name="ForEach"><query tiled_region="L5" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="L6" /></then></action>
+      <action name="ForEach"><query tiled_region="L4" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="L5" /></then></action>
+      <action name="ForEach"><query tiled_region="L3" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="L4" /></then></action>
+      <action name="ForEach"><query tiled_region="L2" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="L3" /></then></action>
+      <action name="ForEach"><query tiled_region="L1" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="L2" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="L1" /></then></action>
+      <action name="ForEach"><query tiled_region="V1" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="V0" /></then></action>
+      <action name="ForEach"><query tiled_region="P" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="V1" /></then></action>
+      <action name="ForEach"><query tiled_region="R1" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="P" /></then></action>
+      <action name="ForEach"><query tiled_region="R2" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="R1" /></then></action>
+      <action name="ForEach"><query tiled_region="R3" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="R2" /></then></action>
+      <action name="ForEach"><query tiled_region="R4" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="R3" /></then></action>
+      <action name="ForEach"><query tiled_region="R5" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="R4" /></then></action>
+      <action name="ForEach"><query tiled_region="R6" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="R5" /></then></action>
+      <action name="ForEach"><query tiled_region="R7" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="R6" /></then></action>
+      <action name="ForEach"><query tiled_region="R8" monitor="HEADLESS-2" /><then><action name="SnapToRegion" region="R7" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" monitor="HEADLESS-2" /><then><action name="Focus" /><action name="Raise" /></then></action></then></action>
+      </keybind>
+    <keybind key="XF86Launch6">
+      <action name="ForEach"><query tiled_region="R7" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R8" /></then></action>
+      <action name="ForEach"><query tiled_region="R6" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R7" /></then></action>
+      <action name="ForEach"><query tiled_region="R5" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R6" /></then></action>
+      <action name="ForEach"><query tiled_region="R4" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R5" /></then></action>
+      <action name="ForEach"><query tiled_region="R3" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R4" /></then></action>
+      <action name="ForEach"><query tiled_region="R2" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R3" /></then></action>
+      <action name="ForEach"><query tiled_region="R1" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R2" /></then></action>
+      <action name="ForEach"><query tiled_region="P" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="R1" /></then></action>
+      <action name="ForEach"><query tiled_region="V1" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="P" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="V1" /></then></action>
+      <action name="ForEach"><query tiled_region="L1" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="V0" /></then></action>
+      <action name="ForEach"><query tiled_region="L2" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L1" /></then></action>
+      <action name="ForEach"><query tiled_region="L3" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L2" /></then></action>
+      <action name="ForEach"><query tiled_region="L4" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L3" /></then></action>
+      <action name="ForEach"><query tiled_region="L5" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L4" /></then></action>
+      <action name="ForEach"><query tiled_region="L6" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L5" /></then></action>
+      <action name="ForEach"><query tiled_region="L7" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L6" /></then></action>
+      <action name="ForEach"><query tiled_region="L8" monitor="HEADLESS-1" /><then><action name="SnapToRegion" region="L7" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" monitor="HEADLESS-1" /><then><action name="Focus" /><action name="Raise" /></then></action>
+    </keybind>
+    <keybind key="XF86Launch7"><action name="None" /></keybind>
+  </keyboard>
+</labwc_config>

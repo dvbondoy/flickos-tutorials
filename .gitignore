@@ -26,3 +26,7 @@ vm-run.log
 __pycache__/
 *.pyc
 .DS_Store
+
+# Recovery spike: test disks and serial logs.
+flickos-recovery-spike/vm/
+flickos-recovery-spike/results/*.log

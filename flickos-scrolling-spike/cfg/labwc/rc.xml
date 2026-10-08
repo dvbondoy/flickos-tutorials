@@ -1,0 +1,242 @@
+<labwc_config>
+  
+  <theme>
+    
+    <name>FlickOS-Arc-Dark</name>
+    <cornerRadius>6</cornerRadius>
+    
+    <icon>Numix-Circle</icon>
+  </theme>
+
+  
+  <windowSwitcher show="yes" preview="yes" outlines="yes" allWorkspaces="no">
+    <fields>
+      <field content="desktop_entry_name" width="30%" />
+      <field content="title" width="70%" />
+    </fields>
+  </windowSwitcher>
+
+  
+  <magnifier>
+    <width>-1</width>
+    <height>-1</height>
+    <initScale>2</initScale>
+    <increment>0.5</increment>
+  </magnifier>
+
+  <keyboard>
+    
+    <default />
+
+    
+    <keybind key="W-Return"><action name="Execute"><command>xdg-terminal-exec</command></action></keybind>
+    <keybind key="W-d"><action name="Execute"><command>sh -c 'pkill -x fuzzel || fuzzel'</command></action></keybind>
+    <keybind key="A-F3"><action name="Execute"><command>sh -c 'pkill -x fuzzel || fuzzel'</command></action></keybind>
+    <keybind key="W-e"><action name="Execute"><command>/usr/libexec/flickos/open-default files</command></action></keybind>
+    <keybind key="W-b"><action name="Execute"><command>/usr/libexec/flickos/open-default browser</command></action></keybind>
+    <keybind key="W-v"><action name="Execute"><command>sh -c 'cliphist list | fuzzel --dmenu --prompt "Clipboard: " | cliphist decode | wl-copy'</command></action></keybind>
+    <keybind key="W-Escape"><action name="Execute"><command>lxtask</command></action></keybind>
+
+    
+    <keybind key="W-q"><action name="Close" /></keybind>
+    <keybind key="W-l"><action name="Execute"><command>/usr/libexec/flickos/lock</command></action></keybind>
+    <keybind key="W-S-e"><action name="Exit" /></keybind>
+    
+    <keybind key="W-S-d"><action name="Execute"><command>flick-tiler show-desktop</command></action></keybind>
+    
+    <keybind key="W-t"><action name="Execute"><command>flick-tiler toggle</command></action></keybind>
+
+    
+    <keybind key="Print"><action name="Execute"><command>flickos-screenshot shot region</command></action></keybind>
+    <keybind key="S-Print"><action name="Execute"><command>flickos-screenshot shot screen</command></action></keybind>
+    <keybind key="C-Print"><action name="Execute"><command>flickos-screenshot shot region --copy-only</command></action></keybind>
+    <keybind key="W-S-s"><action name="Execute"><command>flickos-screenshot</command></action></keybind>
+    <keybind key="W-S-r"><action name="Execute"><command>flickos-screenshot bar --video</command></action></keybind>
+
+    
+    <keybind key="W-equal"><action name="ZoomIn" /><action name="Execute"><command>sh -c "pkill -WINCH -U $(id -u) -f '[f]lickos-shortcuts daemon$'"</command></action></keybind>
+    <keybind key="W-KP_Add"><action name="ZoomIn" /><action name="Execute"><command>sh -c "pkill -WINCH -U $(id -u) -f '[f]lickos-shortcuts daemon$'"</command></action></keybind>
+    <keybind key="W-minus"><action name="ZoomOut" /><action name="Execute"><command>sh -c "pkill -WINCH -U $(id -u) -f '[f]lickos-shortcuts daemon$'"</command></action></keybind>
+    <keybind key="W-KP_Subtract"><action name="ZoomOut" /><action name="Execute"><command>sh -c "pkill -WINCH -U $(id -u) -f '[f]lickos-shortcuts daemon$'"</command></action></keybind>
+    <keybind key="W-0"><action name="ToggleMagnify" /><action name="Execute"><command>sh -c "pkill -WINCH -U $(id -u) -f '[f]lickos-shortcuts daemon$'"</command></action></keybind>
+
+    
+    <keybind key="XF86AudioRaiseVolume"><action name="Execute"><command>wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+</command></action></keybind>
+    <keybind key="XF86AudioLowerVolume"><action name="Execute"><command>wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-</command></action></keybind>
+    <keybind key="XF86AudioMute"><action name="Execute"><command>wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle</command></action></keybind>
+    <keybind key="XF86AudioMicMute"><action name="Execute"><command>wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle</command></action></keybind>
+
+    
+    <keybind key="XF86AudioPlay"><action name="Execute"><command>playerctl play-pause</command></action></keybind>
+    <keybind key="XF86AudioPause"><action name="Execute"><command>playerctl pause</command></action></keybind>
+    <keybind key="XF86AudioStop"><action name="Execute"><command>playerctl stop</command></action></keybind>
+    <keybind key="XF86AudioNext"><action name="Execute"><command>playerctl next</command></action></keybind>
+    <keybind key="XF86AudioPrev"><action name="Execute"><command>playerctl previous</command></action></keybind>
+
+    
+    <keybind key="XF86MonBrightnessUp"><action name="Execute"><command>brightnessctl set 5%+</command></action></keybind>
+    <keybind key="XF86MonBrightnessDown"><action name="Execute"><command>brightnessctl set 5%-</command></action></keybind>
+    <keybind key="Super_L" onRelease="yes"><action name="Execute"><command>sh -c 'pkill -USR2 -U "$(id -u)" -x flickos-menu || flickos-menu super'</command></action></keybind>
+    <keybind key="Super_R" onRelease="yes"><action name="Execute"><command>sh -c 'pkill -USR2 -U "$(id -u)" -x flickos-menu || flickos-menu super'</command></action></keybind>
+    <keybind key="W-a"><action name="Execute"><command>sh -c 'printf quick &gt; "$XDG_RUNTIME_DIR/flickos/menu/request"; pkill -USR1 -U "$(id -u)" -x flickos-menu || flickos-menu quick'</command></action></keybind>
+  <keybind key="W-s">
+      <action name="Execute" command="trail pick" />
+    </keybind>
+    <keybind key="W-S-grave">
+      <action name="Execute" command="trail pick --actions" />
+    </keybind>
+    <keybind key="W-grave">
+      <action name="Execute" command="trail snap --select" />
+    </keybind>
+    <keybind key="W-S-m">
+      <action name="Execute" command="trail mark --prompt" />
+    </keybind>
+    <keybind key="W-S-p">
+      <action name="Execute" command="trail pause --toggle" />
+    </keybind>
+  <keybind key="XF86Launch8">
+      <action name="VirtualOutputAdd" output_name="HEADLESS-PHONE" />
+    </keybind>
+    <keybind key="XF86Launch9">
+      <action name="VirtualOutputRemove" output_name="HEADLESS-PHONE" />
+    </keybind>
+  <keybind key="W-j">
+      <action name="ForEach"><query tiled_region="L7" /><then><action name="SnapToRegion" region="L8" /></then></action>
+      <action name="ForEach"><query tiled_region="L6" /><then><action name="SnapToRegion" region="L7" /></then></action>
+      <action name="ForEach"><query tiled_region="L5" /><then><action name="SnapToRegion" region="L6" /></then></action>
+      <action name="ForEach"><query tiled_region="L4" /><then><action name="SnapToRegion" region="L5" /></then></action>
+      <action name="ForEach"><query tiled_region="L3" /><then><action name="SnapToRegion" region="L4" /></then></action>
+      <action name="ForEach"><query tiled_region="L2" /><then><action name="SnapToRegion" region="L3" /></then></action>
+      <action name="ForEach"><query tiled_region="L1" /><then><action name="SnapToRegion" region="L2" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" /><then><action name="SnapToRegion" region="L1" /></then></action>
+      <action name="ForEach"><query tiled_region="V1" /><then><action name="SnapToRegion" region="V0" /></then></action>
+      <action name="ForEach"><query tiled_region="P" /><then><action name="SnapToRegion" region="V1" /></then></action>
+      <action name="ForEach"><query tiled_region="R1" /><then><action name="SnapToRegion" region="P" /></then></action>
+      <action name="ForEach"><query tiled_region="R2" /><then><action name="SnapToRegion" region="R1" /></then></action>
+      <action name="ForEach"><query tiled_region="R3" /><then><action name="SnapToRegion" region="R2" /></then></action>
+      <action name="ForEach"><query tiled_region="R4" /><then><action name="SnapToRegion" region="R3" /></then></action>
+      <action name="ForEach"><query tiled_region="R5" /><then><action name="SnapToRegion" region="R4" /></then></action>
+      <action name="ForEach"><query tiled_region="R6" /><then><action name="SnapToRegion" region="R5" /></then></action>
+      <action name="ForEach"><query tiled_region="R7" /><then><action name="SnapToRegion" region="R6" /></then></action>
+      <action name="ForEach"><query tiled_region="R8" /><then><action name="SnapToRegion" region="R7" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" /><then><action name="Focus" /><action name="Raise" /></then></action>
+    </keybind>
+    <keybind key="W-Right">
+      <action name="ForEach"><query tiled_region="L7" /><then><action name="SnapToRegion" region="L8" /></then></action>
+      <action name="ForEach"><query tiled_region="L6" /><then><action name="SnapToRegion" region="L7" /></then></action>
+      <action name="ForEach"><query tiled_region="L5" /><then><action name="SnapToRegion" region="L6" /></then></action>
+      <action name="ForEach"><query tiled_region="L4" /><then><action name="SnapToRegion" region="L5" /></then></action>
+      <action name="ForEach"><query tiled_region="L3" /><then><action name="SnapToRegion" region="L4" /></then></action>
+      <action name="ForEach"><query tiled_region="L2" /><then><action name="SnapToRegion" region="L3" /></then></action>
+      <action name="ForEach"><query tiled_region="L1" /><then><action name="SnapToRegion" region="L2" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" /><then><action name="SnapToRegion" region="L1" /></then></action>
+      <action name="ForEach"><query tiled_region="V1" /><then><action name="SnapToRegion" region="V0" /></then></action>
+      <action name="ForEach"><query tiled_region="P" /><then><action name="SnapToRegion" region="V1" /></then></action>
+      <action name="ForEach"><query tiled_region="R1" /><then><action name="SnapToRegion" region="P" /></then></action>
+      <action name="ForEach"><query tiled_region="R2" /><then><action name="SnapToRegion" region="R1" /></then></action>
+      <action name="ForEach"><query tiled_region="R3" /><then><action name="SnapToRegion" region="R2" /></then></action>
+      <action name="ForEach"><query tiled_region="R4" /><then><action name="SnapToRegion" region="R3" /></then></action>
+      <action name="ForEach"><query tiled_region="R5" /><then><action name="SnapToRegion" region="R4" /></then></action>
+      <action name="ForEach"><query tiled_region="R6" /><then><action name="SnapToRegion" region="R5" /></then></action>
+      <action name="ForEach"><query tiled_region="R7" /><then><action name="SnapToRegion" region="R6" /></then></action>
+      <action name="ForEach"><query tiled_region="R8" /><then><action name="SnapToRegion" region="R7" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" /><then><action name="Focus" /><action name="Raise" /></then></action>
+    </keybind>
+    <keybind key="W-k">
+      <action name="ForEach"><query tiled_region="R7" /><then><action name="SnapToRegion" region="R8" /></then></action>
+      <action name="ForEach"><query tiled_region="R6" /><then><action name="SnapToRegion" region="R7" /></then></action>
+      <action name="ForEach"><query tiled_region="R5" /><then><action name="SnapToRegion" region="R6" /></then></action>
+      <action name="ForEach"><query tiled_region="R4" /><then><action name="SnapToRegion" region="R5" /></then></action>
+      <action name="ForEach"><query tiled_region="R3" /><then><action name="SnapToRegion" region="R4" /></then></action>
+      <action name="ForEach"><query tiled_region="R2" /><then><action name="SnapToRegion" region="R3" /></then></action>
+      <action name="ForEach"><query tiled_region="R1" /><then><action name="SnapToRegion" region="R2" /></then></action>
+      <action name="ForEach"><query tiled_region="P" /><then><action name="SnapToRegion" region="R1" /></then></action>
+      <action name="ForEach"><query tiled_region="V1" /><then><action name="SnapToRegion" region="P" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" /><then><action name="SnapToRegion" region="V1" /></then></action>
+      <action name="ForEach"><query tiled_region="L1" /><then><action name="SnapToRegion" region="V0" /></then></action>
+      <action name="ForEach"><query tiled_region="L2" /><then><action name="SnapToRegion" region="L1" /></then></action>
+      <action name="ForEach"><query tiled_region="L3" /><then><action name="SnapToRegion" region="L2" /></then></action>
+      <action name="ForEach"><query tiled_region="L4" /><then><action name="SnapToRegion" region="L3" /></then></action>
+      <action name="ForEach"><query tiled_region="L5" /><then><action name="SnapToRegion" region="L4" /></then></action>
+      <action name="ForEach"><query tiled_region="L6" /><then><action name="SnapToRegion" region="L5" /></then></action>
+      <action name="ForEach"><query tiled_region="L7" /><then><action name="SnapToRegion" region="L6" /></then></action>
+      <action name="ForEach"><query tiled_region="L8" /><then><action name="SnapToRegion" region="L7" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" /><then><action name="Focus" /><action name="Raise" /></then></action>
+    </keybind>
+    <keybind key="W-Left">
+      <action name="ForEach"><query tiled_region="R7" /><then><action name="SnapToRegion" region="R8" /></then></action>
+      <action name="ForEach"><query tiled_region="R6" /><then><action name="SnapToRegion" region="R7" /></then></action>
+      <action name="ForEach"><query tiled_region="R5" /><then><action name="SnapToRegion" region="R6" /></then></action>
+      <action name="ForEach"><query tiled_region="R4" /><then><action name="SnapToRegion" region="R5" /></then></action>
+      <action name="ForEach"><query tiled_region="R3" /><then><action name="SnapToRegion" region="R4" /></then></action>
+      <action name="ForEach"><query tiled_region="R2" /><then><action name="SnapToRegion" region="R3" /></then></action>
+      <action name="ForEach"><query tiled_region="R1" /><then><action name="SnapToRegion" region="R2" /></then></action>
+      <action name="ForEach"><query tiled_region="P" /><then><action name="SnapToRegion" region="R1" /></then></action>
+      <action name="ForEach"><query tiled_region="V1" /><then><action name="SnapToRegion" region="P" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" /><then><action name="SnapToRegion" region="V1" /></then></action>
+      <action name="ForEach"><query tiled_region="L1" /><then><action name="SnapToRegion" region="V0" /></then></action>
+      <action name="ForEach"><query tiled_region="L2" /><then><action name="SnapToRegion" region="L1" /></then></action>
+      <action name="ForEach"><query tiled_region="L3" /><then><action name="SnapToRegion" region="L2" /></then></action>
+      <action name="ForEach"><query tiled_region="L4" /><then><action name="SnapToRegion" region="L3" /></then></action>
+      <action name="ForEach"><query tiled_region="L5" /><then><action name="SnapToRegion" region="L4" /></then></action>
+      <action name="ForEach"><query tiled_region="L6" /><then><action name="SnapToRegion" region="L5" /></then></action>
+      <action name="ForEach"><query tiled_region="L7" /><then><action name="SnapToRegion" region="L6" /></then></action>
+      <action name="ForEach"><query tiled_region="L8" /><then><action name="SnapToRegion" region="L7" /></then></action>
+      <action name="ForEach"><query tiled_region="V0" /><then><action name="Focus" /><action name="Raise" /></then></action>
+    </keybind>
+  </keyboard>
+
+  <mouse>
+    
+    <default />
+
+    
+    <context name="Root">
+      <mousebind button="Left" action="Press">
+        <action name="Execute"><command>sh -c 'pkill -x fuzzel; pkill -WINCH -U "$(id -u)" -x flickos-menu'</command></action>
+      </mousebind>
+      <mousebind button="Right" action="Press">
+        <action name="Execute"><command>sh -c 'pkill -x fuzzel; pkill -WINCH -U "$(id -u)" -x flickos-menu'</command></action>
+        <action name="ShowMenu" menu="root-menu" />
+      </mousebind>
+      </context>
+
+    
+    <context name="All">
+      <mousebind direction="W-Up" action="Scroll">
+        <action name="ZoomIn" />
+        <action name="Execute"><command>sh -c "pkill -WINCH -U $(id -u) -f '[f]lickos-shortcuts daemon$'"</command></action>
+      </mousebind>
+      <mousebind direction="W-Down" action="Scroll">
+        <action name="ZoomOut" />
+        <action name="Execute"><command>sh -c "pkill -WINCH -U $(id -u) -f '[f]lickos-shortcuts daemon$'"</command></action>
+      </mousebind>
+    </context>
+  </mouse>
+<libinput><device category="touchpad">
+      <tap>yes</tap>
+    </device>
+  </libinput><regions><region name="L8" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L7" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L6" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L5" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L4" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L3" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L2" x="0%" y="100%" width="45%" height="100%" />
+    <region name="L1" x="0%" y="100%" width="45%" height="100%" />
+    <region name="V0" x="0%" y="0%" width="45%" height="100%" />
+    <region name="V1" x="45%" y="0%" width="45%" height="100%" />
+    <region name="P" x="90%" y="0%" width="45%" height="100%" />
+    <region name="R1" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R2" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R3" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R4" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R5" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R6" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R7" x="0%" y="100%" width="45%" height="100%" />
+    <region name="R8" x="0%" y="100%" width="45%" height="100%" />
+  </regions><windowRules><windowRule identifier="scroll-1"><action name="MoveToOutput" output="HEADLESS-1" /><action name="SnapToRegion" region="V0" /></windowRule>
+    <windowRule identifier="scroll-2"><action name="MoveToOutput" output="HEADLESS-1" /><action name="SnapToRegion" region="V1" /></windowRule>
+    <windowRule identifier="scroll-3"><action name="MoveToOutput" output="HEADLESS-1" /><action name="SnapToRegion" region="P" /></windowRule>
+    <windowRule identifier="scroll-4"><action name="MoveToOutput" output="HEADLESS-1" /><action name="SnapToRegion" region="R1" /></windowRule>
+  </windowRules></labwc_config>

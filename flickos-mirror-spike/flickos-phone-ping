@@ -1,0 +1,2197 @@
+#!/usr/bin/python3
+"""Send pages, files and text between a phone and the FlickOS computer.
+
+The phone runs the KDE Connect app (F-Droid, Google Play), unchanged; this
+program speaks the part of the KDE Connect protocol (version 8) that moving
+things needs: pairing, kdeconnect.share.request (a page, text, a file),
+kdeconnect.clipboard and kdeconnect.ping, plus the phone's battery (for the
+panel button's tooltip) and kdeconnect.findmyphone.request (ring the phone).
+Nothing else is announced, so the phone's app hides its other features
+(remote input, commands, ...).
+
+The panel button (only while on) opens `flickos-phone menu`: send files,
+typed text, the clipboard or a screenshot, ring the phone, what came from it, Settings.
+
+Off by default (flickos-phone set enabled yes). While off nothing runs. While
+on, `flickos-phone daemon` (started by FlickOS's autostart, never in the live
+session) runs for the session: Python's standard library, no GTK (only
+`send --choose`, the menu's Send Files to Phone..., opens GTK's file
+chooser, in its own short-lived process). It listens
+only while the computer is on a network where a phone was paired (the
+NetworkManager connections in `networks`), or while `flickos-phone pair` runs.
+
+How a phone connects (docs/design/flickos-phone.md, ADR-001 and ADR-003):
+the daemon broadcasts its identity to UDP 1716 and the phone connects to TCP
+1716. In KDE Connect the device that opens the TCP connection is the TLS
+*server*, so the daemon is always the TLS client: it never connects to a
+phone's main port, and answers a phone's broadcast with its own identity sent
+straight back, so the phone connects. That is what lets Python's ssl module
+check an unknown phone's certificate (for pairing) without a verify callback.
+A paired phone's certificate is pinned (compared byte for byte).
+
+Files: identity and paired phones in $XDG_DATA_HOME/flickos/phone/, what came
+from a phone in $XDG_STATE_HOME/flickos/phone/received.jsonl, settings in
+/etc/xdg/flickos/phone.conf then ~/.config/flickos/phone ([Phone]), the
+daemon's lock and control socket in $XDG_RUNTIME_DIR/flickos/phone/. Files a
+phone sends go into the Downloads folder. Every change of a setting is
+recorded for Settings > History.
+
+Exit codes: 0 ok, 1 error, 2 usage error.
+"""
+
+import argparse
+import configparser
+import contextlib
+import dataclasses
+import datetime
+import fcntl
+import hashlib
+import json
+import mimetypes
+import os
+import queue
+import re
+import select
+import selectors
+import shutil
+import signal
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.parse
+import uuid
+
+# FLICKOS_PHONE_PREFIX: run from a source tree, e.g. packages/flickos-phone.
+PREFIX = os.environ.get("FLICKOS_PHONE_PREFIX", "")
+SYSTEM_CONF = PREFIX + "/etc/xdg/flickos/phone.conf"
+# flickos-control's: [History] Enabled=, then the user's ~/.config/flickos/history.
+HISTORY_CONF = PREFIX + "/etc/xdg/flickos/history.conf"
+UFW_CONF = "/etc/ufw/ufw.conf"
+PROC = "/proc"
+DMI_CHASSIS = "/sys/class/dmi/id/chassis_type"
+MACHINE_INFO = "/etc/machine-info"
+SECTION = "Phone"
+
+# The protocol (kdeconnect-kde core/backends/lan/lanlinkprovider.h).
+UDP_PORT = 1716
+TCP_PORT = 1716
+PAYLOAD_PORTS = range(1739, 1765)
+PROTOCOL_VERSION = 8
+MAX_IDENTITY = 8192             # bytes in an identity line, as kdeconnect-kde
+MAX_PACKET = 1 << 20            # bytes in any other line, from a paired phone
+MAX_UNPAIRED = 8                # connections of phones that aren't paired
+HELLO_SECONDS = 5               # to identify itself and finish TLS
+PAIR_CLOCK_SECONDS = 1800       # kdeconnect-kde's ALLOWED_TIMESTAMP_TIME_DIFFERENCE
+DEVICE_ID = re.compile(r"^[A-Za-z0-9_]{32,38}$")
+NAME_JUNK = re.compile(r"[\"',;:.!?()\[\]<>]")   # kdeconnect-kde's filterName
+# What this computer takes from a phone and sends to it; the phone's app
+# hides everything else. The battery only fills the panel button's tooltip;
+# findmyphone rings the phone (Ring My Phone).
+INCOMING = ["kdeconnect.share.request", "kdeconnect.clipboard", "kdeconnect.ping", "kdeconnect.battery"]
+OUTGOING = ["kdeconnect.share.request", "kdeconnect.clipboard", "kdeconnect.ping", "kdeconnect.findmyphone.request"]
+
+ANNOUNCE_SECONDS = 60           # broadcast while no phone is connected
+PAIR_SECONDS = 120              # how long `pair` waits for a phone to ask
+PAIR_ANSWER_SECONDS = 30        # the phone gives up on a request after 30 s
+OFFER_SECONDS = 60              # how long a file sent to the phone is offered
+TRANSFER_SECONDS = 30           # a file transfer that stalls this long fails
+# Text sent to the phone lands on its clipboard, and the app's clipboard sync
+# sends it straight back (at once, or when the app next comes to the front).
+# A clipboard that only repeats what was sent this long ago is dropped.
+ECHO_SECONDS = 600
+NOTIFY_MS = 30000               # mako's 5 s default is too short to click
+FREE_MARGIN = 100 * 1024 * 1024 # a file is refused if it leaves less free
+RECEIVED_ITEMS = 20
+RECEIVED_DAYS = 7
+NETWORK_TYPES = ("802-11-wireless", "802-3-ethernet")
+LAPTOP_CHASSIS = {"8", "9", "10", "14", "31", "32"}
+# The notification's click opens only files like these; anything else (a
+# script, a .desktop file, a program) only shows its folder.
+OPENABLE = ("image/", "audio/", "video/", "text/plain", "application/pdf",
+            "application/vnd.oasis.opendocument.", "application/msword",
+            "application/vnd.openxmlformats-officedocument.", "application/vnd.ms-")
+URL_IN_TEXT = re.compile(r"https?://[^\s\"'<>]+")
+# Other programs offer Send to Phone while this name is found on PATH
+# (flickos-screenshot's markup window). The daemon keeps it as a link in
+# $XDG_RUNTIME_DIR/flickos/bin, which flickos-settings' flickos-session puts
+# last on PATH, so it is there exactly while the phone connection is on.
+ON_LINK = "flickos-phone-on"
+# The panel button (custom/phone in flickos-layouts' common/modules.jsonc,
+# in the panel only while this is on): waybar runs `status --panel` again
+# when it gets SIGRTMIN+PANEL_SIGNAL, which the daemon sends when a phone
+# connects or goes away. flick-tiler's button uses 8.
+PANEL_SIGNAL = 9
+MENU_RECEIVED = 5               # the newest received items in the button's menu
+SCREENSHOT_DELAY = 0.4          # seconds for the menu to leave the screen before grim
+
+
+class PhoneError(Exception):
+    pass
+
+
+class ProtocolError(Exception):
+    pass
+
+
+def warn(message):
+    print(f"flickos-phone: {message}", file=sys.stderr, flush=True)
+
+
+# --- Places ---------------------------------------------------------------------
+
+def home_dir(variable, *default):
+    return os.environ.get(variable) or os.path.join(os.path.expanduser("~"), *default)
+
+
+def config_home():
+    return home_dir("XDG_CONFIG_HOME", ".config")
+
+
+def data_dir():
+    return os.path.join(home_dir("XDG_DATA_HOME", ".local", "share"), "flickos", "phone")
+
+
+def state_home():
+    return home_dir("XDG_STATE_HOME", ".local", "state")
+
+
+def state_dir():
+    return os.path.join(state_home(), "flickos", "phone")
+
+
+def user_conf():
+    return os.path.join(config_home(), "flickos", "phone")
+
+
+def runtime_dir():
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    if not base or not os.path.isabs(base) or not os.path.isdir(base):
+        raise PhoneError("XDG_RUNTIME_DIR is not set")
+    return os.path.join(base, "flickos", "phone")
+
+
+def control_path():
+    return os.path.join(runtime_dir(), "control")
+
+
+def on_link_path():
+    return os.path.join(os.path.dirname(runtime_dir()), "bin", ON_LINK)
+
+
+def make_on_link(target):
+    path = on_link_path()
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(tmp)
+    os.symlink(target, tmp)
+    os.replace(tmp, path)
+
+
+def remove_on_link():
+    with contextlib.suppress(FileNotFoundError, PhoneError):
+        os.unlink(on_link_path())
+
+
+def live_session():
+    try:
+        with open(os.path.join(PROC, "cmdline"), encoding="utf-8") as f:
+            return "boot=live" in f.read().split()
+    except OSError:
+        return False
+
+
+def write_atomic(path, text, mode=0o644):
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+# --- Settings -------------------------------------------------------------------
+
+@dataclasses.dataclass
+class Settings:
+    enabled: bool = False
+    name: str = ""              # empty: the computer's name
+    networks: tuple = ()
+
+
+KEYS = {"enabled": "Enabled", "name": "Name", "networks": "Networks"}
+
+
+def read_ini(path):
+    ini = configparser.ConfigParser(interpolation=None)
+    try:
+        ini.read(path, encoding="utf-8")
+    except (configparser.Error, UnicodeDecodeError) as error:
+        warn(f"{path}: {error}")
+        return {}
+    return dict(ini[SECTION]) if ini.has_section(SECTION) else {}
+
+
+def parse_settings(values):
+    settings = Settings()
+    if "enabled" in values:
+        settings.enabled = values["enabled"].strip().lower() in ("yes", "true", "1", "on")
+    if values.get("name", "").strip():
+        settings.name = clean_name(values["name"])
+    if "networks" in values:
+        settings.networks = tuple(dict.fromkeys(values["networks"].split()))
+    return settings
+
+
+def load_settings():
+    values = read_ini(SYSTEM_CONF)
+    values.update(read_ini(user_conf()))
+    return parse_settings(values)
+
+
+def system_settings():
+    return parse_settings(read_ini(SYSTEM_CONF))
+
+
+def setting_text(settings, key):
+    value = getattr(settings, key)
+    if key == "enabled":
+        return "yes" if value else "no"
+    if key == "networks":
+        return " ".join(value)
+    return value
+
+
+def save_settings(**changes):
+    """Write settings to the user's file, keeping its other keys. None removes
+    one, so the system's applies again. A change that shows is recorded."""
+    before = load_settings()
+    ini = configparser.ConfigParser(interpolation=None)
+    ini.optionxform = str
+    with contextlib.suppress(configparser.Error, UnicodeDecodeError):
+        ini.read(user_conf(), encoding="utf-8")
+    if not ini.has_section(SECTION):
+        ini.add_section(SECTION)
+    for key, value in changes.items():
+        for existing in list(ini[SECTION]):
+            if existing.lower() == KEYS[key].lower():
+                ini.remove_option(SECTION, existing)
+        if value is None:
+            continue
+        if key == "enabled":
+            value = "yes" if value else "no"
+        elif key == "networks":
+            value = " ".join(value)
+        ini[SECTION][KEYS[key]] = str(value)
+    out = [f"[{SECTION}]"] + [f"{key}={value}" for key, value in ini[SECTION].items()]
+    write_atomic(user_conf(), "\n".join(out) + "\n")
+    after = load_settings()
+    for key in changes:
+        old, new = setting_text(before, key), setting_text(after, key)
+        if key == "name":
+            old, new = old or DEFAULT_CHOICE, new or DEFAULT_CHOICE
+        record(key, old, new)
+    return after
+
+
+def clean_name(name):
+    """A name the phone accepts: no "',;:.!?()[]<>, at most 32 characters."""
+    return NAME_JUNK.sub("", name).strip()[:32].strip()
+
+
+def computer_name():
+    """The pretty host name (hostnamectl set-hostname --pretty), else the host name."""
+    try:
+        with open(MACHINE_INFO, encoding="utf-8") as f:
+            for line in f:
+                key, _, value = line.strip().partition("=")
+                if key == "PRETTY_HOSTNAME" and value.strip().strip("\"'"):
+                    return clean_name(value.strip().strip("\"'")) or "FlickOS"
+    except OSError:
+        pass
+    return clean_name(socket.gethostname()) or "FlickOS"
+
+
+def device_name(settings):
+    return settings.name or computer_name()
+
+
+def device_type():
+    try:
+        with open(DMI_CHASSIS, encoding="utf-8") as f:
+            return "laptop" if f.read().strip() in LAPTOP_CHASSIS else "desktop"
+    except OSError:
+        return "desktop"
+
+
+# --- History ------------------------------------------------------------------------
+# Every change of a setting is recorded for Settings > History. One JSON line per
+# change, appended; the format is shared with flickos-control, flickos-layout and
+# flick-tiler (docs/design/flickos-history.md, ADR-002).
+
+HISTORY_OWNER = "flickos-phone"
+HISTORY_FILE = "history.jsonl"      # in $XDG_STATE_HOME/flickos
+HISTORY_LOCK = "history.lock"
+HISTORY_BYTES = 256 * 1024          # above this, the older half is dropped
+DEFAULT_CHOICE = "default"
+
+
+def history_enabled():
+    enabled = True
+    for path in (HISTORY_CONF, os.path.join(config_home(), "flickos", "history")):
+        ini = configparser.ConfigParser(interpolation=None)
+        try:
+            ini.read(path, encoding="utf-8")
+            value = ini.get("History", "Enabled", fallback=None)
+        except (configparser.Error, UnicodeDecodeError):
+            continue
+        if value is not None:
+            enabled = value.strip().lower() not in ("no", "false", "off", "0")
+    return enabled
+
+
+def record(key, old, new):
+    """Add a change to the history. It never stops the change itself: a
+    history that can't be written is only a warning."""
+    if old == new or not history_enabled():
+        return
+    now = time.time_ns()
+    entry = {"v": 1, "id": str(now),
+             "time": datetime.datetime.fromtimestamp(now / 1e9).astimezone().isoformat(timespec="seconds"),
+             "owner": HISTORY_OWNER, "key": key, "old": old, "new": new}
+    folder = os.path.join(state_home(), "flickos")
+    try:
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        with open(os.path.join(folder, HISTORY_LOCK), "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            path = os.path.join(folder, HISTORY_FILE)
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                size = os.fstat(f.fileno()).st_size
+            if size > HISTORY_BYTES:
+                trim_history(path)
+    except OSError as error:
+        warn(f"the history can't be written: {error}")
+
+
+def trim_history(path):
+    """Keep the newest lines that fit in half of HISTORY_BYTES (under the lock)."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+    kept, size = [], 0
+    for line in reversed(lines):
+        size += len(line.encode())
+        if size > HISTORY_BYTES // 2:
+            break
+        kept.append(line)
+    write_atomic(path, "".join(reversed(kept)), mode=0o600)
+
+
+# --- Identity and certificates ----------------------------------------------------
+
+@dataclasses.dataclass
+class Identity:
+    id: str
+    cert: str       # paths
+    key: str
+    der: bytes
+
+
+def ensure_identity():
+    """This computer's device id and certificate, made at the first use: a UUID
+    without dashes and a self-signed EC P-256 certificate whose common name is
+    the id, as kdeconnect-kde makes them (core/sslhelper.cpp)."""
+    folder = data_dir()
+    os.makedirs(os.path.join(folder, "devices"), mode=0o700, exist_ok=True)
+    os.chmod(folder, 0o700)
+    id_path = os.path.join(folder, "device_id")
+    cert, key = os.path.join(folder, "cert.pem"), os.path.join(folder, "key.pem")
+    if not os.path.exists(id_path):
+        write_atomic(id_path, uuid.uuid4().hex + "\n")
+    with open(id_path, encoding="utf-8") as f:
+        device_id = f.read().strip()
+    if not DEVICE_ID.match(device_id):
+        raise PhoneError(f"{id_path}: not a device id")
+    if not (os.path.exists(cert) and os.path.exists(key)):
+        old_umask = os.umask(0o077)
+        try:
+            result = subprocess.run(
+                ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+                 "-noenc", "-keyout", key, "-out", cert, "-sha512", "-days", "3650",
+                 "-subj", f"/O=KDE/OU=KDE Connect/CN={device_id}"],
+                capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise PhoneError(f"can't make a certificate: {error}") from None
+        finally:
+            os.umask(old_umask)
+        if result.returncode != 0:
+            raise PhoneError(f"can't make a certificate: {result.stderr.strip()}")
+    with open(cert, encoding="ascii") as f:
+        der = ssl.PEM_cert_to_DER_cert(f.read())
+    return Identity(device_id, cert, key, der)
+
+
+def der_item(data, pos):
+    """(tag, start of the value, end) of the DER item at pos."""
+    if pos + 2 > len(data):
+        raise ProtocolError("certificate cut short")
+    tag, length = data[pos], data[pos + 1]
+    pos += 2
+    if length & 0x80:
+        count = length & 0x7F
+        if not 1 <= count <= 4 or pos + count > len(data):
+            raise ProtocolError("bad certificate length")
+        length = int.from_bytes(data[pos:pos + count], "big")
+        pos += count
+    if pos + length > len(data):
+        raise ProtocolError("certificate cut short")
+    return tag, pos, pos + length
+
+
+def der_children(data, start, end):
+    items, pos = [], start
+    while pos < end:
+        tag, value, pos = der_item(data, pos)
+        items.append((tag, value, pos))
+    return items
+
+
+def cert_fields(der):
+    """(common name of the subject, SubjectPublicKeyInfo DER) of a certificate.
+
+    tbsCertificate is: [0] version, serial, signature, issuer, validity,
+    subject, subjectPublicKeyInfo, ... (RFC 5280)."""
+    _, cert, _ = der_item(der, 0)
+    _, tbs, tbs_end = der_item(der, cert)
+    fields = der_children(der, tbs, tbs_end)
+    if fields and fields[0][0] == 0xA0:
+        fields = fields[1:]
+    if len(fields) < 6:
+        raise ProtocolError("not a certificate")
+    _, subject, subject_end = fields[4]
+    # The whole item, header and all: it starts where the subject ends.
+    spki = der[subject_end:fields[5][2]]
+    common_name = None
+    for _, rdn, rdn_end in der_children(der, subject, subject_end):
+        for _, pair, pair_end in der_children(der, rdn, rdn_end):
+            parts = der_children(der, pair, pair_end)
+            if len(parts) == 2 and der[parts[0][1]:parts[0][2]] == b"\x55\x04\x03":
+                common_name = der[parts[1][1]:parts[1][2]].decode("utf-8", "replace")
+    return common_name, spki
+
+
+def verification_key(my_der, their_der, timestamp):
+    """The key both screens show while pairing (kdeconnect-kde's
+    PairingHandler::verificationKey): SHA-256 of the larger public key, the
+    smaller one and the timestamp, the first 8 hex digits in capitals."""
+    a, b = cert_fields(my_der)[1], cert_fields(their_der)[1]
+    if a < b:
+        a, b = b, a
+    return hashlib.sha256(a + b + str(timestamp).encode()).hexdigest()[:8].upper()
+
+
+def client_context(identity):
+    """TLS client with our certificate. The phone's certificate isn't verified
+    by ssl: the caller compares it (pairing, or the pinned one)."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.load_cert_chain(identity.cert, identity.key)
+    return ctx
+
+
+def pinned_server_context(identity, phone_der):
+    """TLS server that accepts only this phone's certificate."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(identity.cert, identity.key)
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+    ctx.load_verify_locations(cadata=ssl.DER_cert_to_PEM_cert(phone_der))
+    return ctx
+
+
+# --- Paired phones ---------------------------------------------------------------
+
+def devices_file():
+    return os.path.join(data_dir(), "devices.json")
+
+
+def cert_path(device_id):
+    return os.path.join(data_dir(), "devices", device_id + ".pem")
+
+
+def load_devices():
+    """{id: {"name": ..., "paired": iso time}} of the paired phones."""
+    try:
+        with open(devices_file(), encoding="utf-8") as f:
+            devices = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return {key: value for key, value in devices.items()
+            if DEVICE_ID.match(key) and isinstance(value, dict) and os.path.exists(cert_path(key))}
+
+
+def save_devices(devices):
+    write_atomic(devices_file(), json.dumps(devices, indent=1, ensure_ascii=False) + "\n", mode=0o600)
+
+
+def paired_der(device_id):
+    try:
+        with open(cert_path(device_id), encoding="ascii") as f:
+            return ssl.PEM_cert_to_DER_cert(f.read())
+    except (OSError, ValueError):
+        return None
+
+
+def trust_device(device_id, name, der):
+    os.makedirs(os.path.dirname(cert_path(device_id)), mode=0o700, exist_ok=True)
+    write_atomic(cert_path(device_id), ssl.DER_cert_to_PEM_cert(der), mode=0o600)
+    devices = load_devices()
+    devices[device_id] = {"name": name, "paired": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
+    save_devices(devices)
+    record(f"device.{device_id}", "absent", name)
+
+
+def rename_device(device_id, name):
+    devices = load_devices()
+    if device_id in devices and devices[device_id].get("name") != name:
+        devices[device_id]["name"] = name
+        save_devices(devices)
+
+
+def forget_device(device_id):
+    devices = load_devices()
+    name = devices.pop(device_id, {}).get("name")
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(cert_path(device_id))
+    save_devices(devices)
+    if name is not None:
+        record(f"device.{device_id}", name, "absent")
+    return name
+
+
+# --- What came from a phone ----------------------------------------------------------
+
+def received_path():
+    return os.path.join(state_dir(), "received.jsonl")
+
+
+def read_received(now=None):
+    now = time.time() if now is None else now
+    items = []
+    try:
+        with open(received_path(), encoding="utf-8") as f:
+            for line in f:
+                with contextlib.suppress(ValueError):
+                    item = json.loads(line)
+                    if isinstance(item, dict) and now - item.get("time", 0) <= RECEIVED_DAYS * 86400:
+                        items.append(item)
+    except OSError:
+        pass
+    return items[-RECEIVED_ITEMS:]
+
+
+def add_received(kind, device, value, now=None):
+    item = {"time": time.time() if now is None else now, "device": device, "kind": kind, "value": value}
+    items = read_received(item["time"]) + [item]
+    os.makedirs(state_dir(), mode=0o700, exist_ok=True)
+    write_atomic(received_path(), "".join(json.dumps(i, ensure_ascii=False) + "\n"
+                                          for i in items[-RECEIVED_ITEMS:]), mode=0o600)
+
+
+# --- Helpers the daemon runs -------------------------------------------------------
+
+def spawn(argv):
+    """Start a program that outlives nothing of ours (an app, xdg-open)."""
+    try:
+        subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as error:
+        warn(f"{argv[0]}: {error}")
+
+
+def copy_text(text):
+    try:
+        subprocess.run(["wl-copy", "--", text], check=False, timeout=10,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        warn(f"wl-copy: {error}")
+
+
+def clipboard_text():
+    try:
+        result = subprocess.run(["wl-paste", "--no-newline", "--type", "text"], capture_output=True,
+                                text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise PhoneError(f"wl-paste: {error}") from None
+    if result.returncode != 0:
+        raise PhoneError("the clipboard has no text")
+    return result.stdout
+
+
+def notify(title, body, action=None, on_click=None):
+    """A notification; a click runs on_click (mako shows no buttons, so a
+    notification has at most the one action a click runs)."""
+    argv = ["notify-send", "--app-name=Phone", "--icon=phone", f"--expire-time={NOTIFY_MS}", title, body]
+    if action and on_click:
+        argv[1:1] = [f"--action=default={action}"]
+
+    def run():
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=NOTIFY_MS / 1000 + 60)
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        if on_click and result.stdout.strip() == "default":
+            on_click()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def downloads_dir():
+    try:
+        result = subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True, timeout=5)
+        folder = result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        folder = ""
+    home = os.path.expanduser("~")
+    if not folder or os.path.realpath(folder) == os.path.realpath(home):
+        folder = os.path.join(home, "Downloads")
+    return folder
+
+
+def signal_panel():
+    """Make waybar show the phone button's new state. waybar ignores real-time
+    signals no module uses, so a panel without the button is unaffected."""
+    try:
+        subprocess.run(["pkill", f"-RTMIN+{PANEL_SIGNAL}", "-u", str(os.getuid()), "-x", "waybar"],
+                       check=False, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def reload_panel():
+    """The phone button is in the panel only while this is on: have
+    flickos-layout generate the panel again (only inside the session)."""
+    if not os.environ.get("WAYLAND_DISPLAY") or shutil.which("flickos-layout") is None:
+        return
+    try:
+        subprocess.run(["flickos-layout", "reload-panel"], check=False, timeout=30,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def firewall_on():
+    try:
+        with open(UFW_CONF, encoding="utf-8") as f:
+            return any(line.strip().lower() == "enabled=yes" for line in f)
+    except OSError:
+        return False
+
+
+def active_networks():
+    """UUIDs of the active Wi-Fi and wired NetworkManager connections, or None
+    if NetworkManager can't be asked."""
+    try:
+        result = subprocess.run(["nmcli", "-t", "-f", "UUID,TYPE", "connection", "show", "--active"],
+                                capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_active(result.stdout)
+
+
+def parse_active(text):
+    uuids = []
+    for line in text.splitlines():
+        uuid_, _, kind = line.partition(":")
+        if kind in NETWORK_TYPES and uuid_:
+            uuids.append(uuid_)
+    return uuids
+
+
+def network_names():
+    try:
+        result = subprocess.run(["nmcli", "-t", "-f", "UUID,NAME", "connection", "show"],
+                                capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    names = {}
+    for line in result.stdout.splitlines():
+        uuid_, _, name = line.partition(":")
+        names[uuid_] = name.replace("\\:", ":")
+    return names
+
+
+# --- Packets ------------------------------------------------------------------------
+
+def packet(ptype, body, **extra):
+    data = {"id": int(time.time() * 1000), "type": ptype, "body": body}
+    data.update(extra)
+    return (json.dumps(data, ensure_ascii=False) + "\n").encode()
+
+
+class LineReader:
+    def __init__(self, sock, limit):
+        self.sock, self.limit, self.buffer = sock, limit, b""
+
+    def packet(self):
+        while b"\n" not in self.buffer:
+            if len(self.buffer) > self.limit:
+                raise ProtocolError(f"a line longer than {self.limit} bytes")
+            data = self.sock.recv(65536)
+            if not data:
+                raise EOFError
+            self.buffer += data
+        line, _, self.buffer = self.buffer.partition(b"\n")
+        if len(line) > self.limit:
+            raise ProtocolError(f"a line longer than {self.limit} bytes")
+        try:
+            data = json.loads(line)
+        except ValueError:
+            raise ProtocolError("not JSON") from None
+        if not isinstance(data, dict) or not isinstance(data.get("body", {}), dict):
+            raise ProtocolError("not a packet")
+        return data
+
+
+def check_identity(data):
+    """The body of an identity packet, or ProtocolError."""
+    body = data.get("body", {})
+    if data.get("type") != "kdeconnect.identity":
+        raise ProtocolError(f"expected an identity, got {data.get('type')!r}")
+    if not isinstance(body.get("deviceId"), str) or not DEVICE_ID.match(body["deviceId"]):
+        raise ProtocolError("bad device id")
+    if body.get("protocolVersion") != PROTOCOL_VERSION:
+        raise ProtocolError(f"protocol version {body.get('protocolVersion')!r}, not {PROTOCOL_VERSION}")
+    name = body.get("deviceName")
+    body["deviceName"] = clean_name(name) if isinstance(name, str) and clean_name(name) else "Phone"
+    return body
+
+
+# --- What comes in -------------------------------------------------------------------
+
+def clean_address(url):
+    """Some apps share an address HTML-escaped (Facebook's browser: &amp;)."""
+    return url.strip().replace("&amp;", "&")
+
+
+def web_address(url):
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.netloc)
+
+
+def short_address(url, limit=60):
+    """Host and path, for a notification: the rest is mostly tracking."""
+    parts = urllib.parse.urlsplit(url)
+    text = parts.netloc + parts.path
+    text = text[4:] if text.startswith("www.") else text
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def clean_filename(name):
+    """The last part of a name, without a leading dot, control characters or
+    slashes, so a file lands in the folder and isn't hidden."""
+    name = str(name).replace("\\", "/").rsplit("/", 1)[-1]
+    name = "".join(ch for ch in name if ch.isprintable()).strip().lstrip(".").strip()
+    while len(name.encode()) > 200:
+        stem, ext = os.path.splitext(name)
+        name = stem[:-1] + ext if len(stem) > 1 else name[:100]
+    return name or "file"
+
+
+def free_name(folder, name):
+    """A path in folder for name that isn't taken: name, name (2), name (3)..."""
+    stem, ext = os.path.splitext(name)
+    path, n = os.path.join(folder, name), 2
+    while os.path.lexists(path):
+        path, n = os.path.join(folder, f"{stem} ({n}){ext}"), n + 1
+    return path
+
+
+def openable(path):
+    kind = mimetypes.guess_type(path)[0] or ""
+    return kind.startswith(OPENABLE) and not kind.startswith(("text/x-", "application/x-"))
+
+
+# --- The daemon ---------------------------------------------------------------------
+
+class Link:
+    """A connected phone, after the handshake."""
+
+    def __init__(self, tls, reader, device_id, name, der, address, paired):
+        self.tls, self.reader, self.id, self.name = tls, reader, device_id, name
+        self.der, self.address, self.paired = der, address, paired
+        self.send_lock = threading.Lock()
+        self.counted = not paired        # holds one of the MAX_UNPAIRED places
+        self.battery = None             # (percent, charging) from kdeconnect.battery
+
+    def send(self, ptype, body, **extra):
+        with self.send_lock:
+            self.tls.sendall(packet(ptype, body, **extra))
+
+    def hang_up(self):
+        """End the link from another thread: the reading thread's read ends,
+        and that thread closes it. Never close it from here: OpenSSL in the
+        reading thread goes on using the number, and once the number is
+        reused (a pipe, a file) its alert lands in that."""
+        with contextlib.suppress(OSError):
+            self.tls.shutdown(socket.SHUT_RDWR)
+
+    def close(self):
+        """Only the thread that reads the link (handle_connection)."""
+        self.hang_up()
+        with self.send_lock, contextlib.suppress(OSError):
+            self.tls.close()
+
+
+class PairSession:
+    """`flickos-phone pair`: phones may ask to pair until it ends."""
+
+    def __init__(self):
+        self.requests = queue.Queue()
+        self.deadline = time.monotonic() + PAIR_SECONDS
+
+
+class Daemon:
+    def __init__(self, identity, settings, bind="", tcp_port=TCP_PORT, payload_ports=PAYLOAD_PORTS,
+                 udp=True, networks=active_networks):
+        self.identity, self.settings = identity, settings
+        self.bind, self.tcp_port, self.payload_ports = bind, tcp_port, payload_ports
+        self.use_udp, self.networks = udp, networks
+        self.lock = threading.RLock()
+        self.links = {}
+        self.unpaired = 0
+        self.pairing = None
+        self.tcp = self.udp = None
+        self.allowed = False            # on a network in settings.networks
+        self.next_announce = 0.0
+        self.recheck_at = None
+        self.failed = False
+        self.stopping = threading.Event()
+        self.selector = selectors.DefaultSelector()
+        self.wake_r, self.wake_w = socket.socketpair()
+        self.last_answer = {}
+        self.sent_texts = {}            # device id -> [(monotonic time, text)], for echoes
+
+    # -- identity packets
+    def name(self):
+        return device_name(self.settings)
+
+    def full_identity(self):
+        return {"deviceId": self.identity.id, "deviceName": self.name(), "deviceType": device_type(),
+                "protocolVersion": PROTOCOL_VERSION, "incomingCapabilities": INCOMING,
+                "outgoingCapabilities": OUTGOING}
+
+    def discovery(self):
+        return packet("kdeconnect.identity", {
+            "deviceId": self.identity.id, "deviceName": self.name(), "deviceType": device_type(),
+            "protocolVersion": PROTOCOL_VERSION, "tcpPort": self.tcp.getsockname()[1]})
+
+    # -- main loop
+    def wake(self):
+        with contextlib.suppress(OSError):
+            self.wake_w.send(b"x")
+
+    def recheck(self):
+        """From another thread: have the main loop look at the network again
+        (only the main loop opens and closes the listening sockets)."""
+        self.recheck_at = time.monotonic()
+        self.wake()
+
+    def run(self, control=None, session_socket=None, monitor=None):
+        """Until SIGTERM, `stop`, or the compositor going away."""
+        self.selector.register(self.wake_r, selectors.EVENT_READ, "wake")
+        if control is not None:
+            self.selector.register(control, selectors.EVENT_READ, "control")
+        if session_socket is not None:
+            self.selector.register(session_socket, selectors.EVENT_READ, "session")
+        if monitor is not None:
+            self.selector.register(monitor.stdout, selectors.EVENT_READ, "monitor")
+        self.check_network()
+        try:
+            while not self.stopping.is_set():
+                for key, _ in self.selector.select(self.timeout()):
+                    self.handle_event(key)
+                self.timers()
+        finally:
+            self.close_all()
+        return 1 if self.failed else 0
+
+    def handle_event(self, key):
+        kind = key.data
+        if kind == "wake":
+            with contextlib.suppress(OSError):
+                self.wake_r.recv(4096)
+            self.update_listening()
+        elif kind == "control":
+            conn, _ = key.fileobj.accept()
+            threading.Thread(target=self.serve_control, args=(conn,), daemon=True).start()
+        elif kind == "session":
+            with contextlib.suppress(OSError):
+                if key.fileobj.recv(4096):
+                    return
+            self.stopping.set()
+        elif kind == "monitor":
+            if not key.fileobj.readline():
+                self.selector.unregister(key.fileobj)
+            # NetworkManager says a lot at once: look again a moment later.
+            self.recheck_at = time.monotonic() + 1
+        elif kind == "tcp":
+            try:
+                sock, address = key.fileobj.accept()
+            except OSError:
+                return
+            threading.Thread(target=self.handle_connection, args=(sock, address), daemon=True).start()
+        elif kind == "udp":
+            self.handle_broadcast()
+
+    def timeout(self):
+        deadlines = []
+        if self.recheck_at is not None:
+            deadlines.append(self.recheck_at)
+        if self.tcp is not None and not self.links:
+            deadlines.append(self.next_announce)
+        if not deadlines:
+            return None
+        return max(0.0, min(deadlines) - time.monotonic())
+
+    def timers(self):
+        now = time.monotonic()
+        if self.recheck_at is not None and now >= self.recheck_at:
+            self.recheck_at = None
+            self.check_network()
+        if self.tcp is not None and not self.links and now >= self.next_announce:
+            self.announce()
+
+    # -- where it listens
+    def check_network(self):
+        active = self.networks()
+        with self.lock:
+            was = self.allowed
+            self.allowed = bool(active) and any(uuid_ in self.settings.networks for uuid_ in active)
+        self.update_listening(changed=was != self.allowed)
+
+    def update_listening(self, changed=False):
+        with self.lock:
+            want = self.allowed or self.pairing is not None
+        if want and self.tcp is None:
+            self.open_sockets()
+            self.announce()
+        elif not want and self.tcp is not None:
+            self.close_sockets()
+        elif want and changed:
+            self.announce()
+
+    def open_sockets(self):
+        tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            tcp.bind((self.bind, self.tcp_port))
+        except OSError as error:
+            tcp.close()
+            warn(f"can't listen on TCP {self.tcp_port}: {error} (KDE Connect or GSConnect running?)")
+            self.failed = True
+            self.stopping.set()
+            return
+        tcp.listen(8)
+        self.tcp = tcp
+        self.selector.register(tcp, selectors.EVENT_READ, "tcp")
+        if self.use_udp:
+            udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            udp.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            try:
+                udp.bind((self.bind, UDP_PORT))
+            except OSError as error:
+                warn(f"can't listen on UDP {UDP_PORT}: {error}")
+                udp.close()
+            else:
+                self.udp = udp
+                self.selector.register(udp, selectors.EVENT_READ, "udp")
+
+    def close_sockets(self):
+        for sock in (self.tcp, self.udp):
+            if sock is not None:
+                with contextlib.suppress(KeyError, ValueError):
+                    self.selector.unregister(sock)
+                sock.close()
+        self.tcp = self.udp = None
+        with self.lock:
+            links = list(self.links.values())
+        for link in links:
+            link.hang_up()              # its thread closes it
+
+    def close_all(self):
+        self.close_sockets()
+        self.stopping.set()
+        self.selector.close()
+        self.wake_r.close()
+        self.wake_w.close()
+
+    def announce(self):
+        """Broadcast who we are. Every phone that hears it opens a connection,
+        even one already connected, so this happens only while none is."""
+        self.next_announce = time.monotonic() + ANNOUNCE_SECONDS
+        if self.udp is None:
+            return
+        with contextlib.suppress(OSError):
+            self.udp.sendto(self.discovery(), ("255.255.255.255", UDP_PORT))
+
+    def handle_broadcast(self):
+        """A phone announced itself: answer straight back so that it connects
+        to us (we stay the TLS client, ADR-003)."""
+        try:
+            data, (address, _) = self.udp.recvfrom(MAX_IDENTITY)
+            body = check_identity(json.loads(data))
+        except (OSError, ValueError, ProtocolError, AttributeError):
+            return
+        if body["deviceId"] == self.identity.id or body["deviceId"] in self.links:
+            return
+        now = time.monotonic()
+        if now - self.last_answer.get(address, 0) < 2:
+            return
+        self.last_answer[address] = now
+        with contextlib.suppress(OSError):
+            self.udp.sendto(self.discovery(), (address, UDP_PORT))
+
+    # -- a phone's connection (one thread each)
+    def handle_connection(self, sock, address):
+        with self.lock:
+            if self.unpaired >= MAX_UNPAIRED:
+                sock.close()
+                return
+            self.unpaired += 1
+        link = None
+        try:
+            link = self.handshake(sock, address[0])
+            self.serve_link(link)
+        except (OSError, EOFError, ProtocolError, ssl.SSLError, ValueError):
+            pass
+        finally:
+            with self.lock:
+                if link is None or link.counted:
+                    self.unpaired -= 1
+                if link is not None and self.links.get(link.id) is link:
+                    del self.links[link.id]
+            if link is not None:
+                link.close()
+                if link.paired:
+                    signal_panel()
+            with contextlib.suppress(OSError):
+                sock.close()
+            self.wake()
+
+    def handshake(self, sock, address):
+        sock.settimeout(HELLO_SECONDS)
+        reader = LineReader(sock, MAX_IDENTITY)
+        hello = check_identity(reader.packet())
+        if hello.get("targetDeviceId") not in (None, self.identity.id):
+            raise ProtocolError("for another device")
+        if reader.buffer:
+            raise ProtocolError("data before TLS")
+        # From here the TLS socket owns the connection: close it on failure.
+        tls = client_context(self.identity).wrap_socket(sock, server_side=False)
+        try:
+            der = tls.getpeercert(binary_form=True)
+            if not der or cert_fields(der)[0] != hello["deviceId"]:
+                raise ProtocolError("the certificate isn't this device's")
+            tls.sendall(packet("kdeconnect.identity", self.full_identity()))
+            reader = LineReader(tls, MAX_IDENTITY)
+            body = check_identity(reader.packet())
+            if body["deviceId"] != hello["deviceId"]:
+                raise ProtocolError("the device id changed")
+        except BaseException:
+            tls.close()
+            raise
+        paired = paired_der(body["deviceId"]) == der
+        link = Link(tls, reader, body["deviceId"], body["deviceName"], der, address, paired)
+        if paired:
+            reader.limit = MAX_PACKET
+            rename_device(link.id, link.name)
+        with self.lock:
+            if paired:
+                self.unpaired -= 1
+            old = self.links.get(link.id)
+            self.links[link.id] = link
+        if old is not None:
+            old.hang_up()               # its thread closes it
+        tls.settimeout(None)
+        self.wake()
+        if paired:
+            signal_panel()
+        return link
+
+    def serve_link(self, link):
+        while not self.stopping.is_set():
+            data = link.reader.packet()
+            ptype, body = data.get("type"), data.get("body", {})
+            if ptype == "kdeconnect.pair":
+                self.on_pair(link, body)
+            elif not link.paired:
+                continue        # nothing but pairing before pairing
+            elif ptype == "kdeconnect.share.request":
+                self.on_share(link, data)
+            elif ptype == "kdeconnect.clipboard" and isinstance(body.get("content"), str):
+                if self.is_echo(link.id, body["content"]):
+                    continue
+                copy_text(body["content"])
+                add_received("clipboard", link.name, body["content"])
+                notify(f"Clipboard from {link.name}", body["content"][:200])
+            elif ptype == "kdeconnect.ping":
+                notify(f"Ping from {link.name}", body.get("message", "") if isinstance(body.get("message"), str) else "")
+            elif ptype == "kdeconnect.battery":
+                self.on_battery(link, body)
+
+    def remember_sent(self, device_id, text):
+        now = time.monotonic()
+        with self.lock:
+            recent = [(when, old) for when, old in self.sent_texts.get(device_id, [])
+                      if now - when < ECHO_SECONDS and old != text]
+            self.sent_texts[device_id] = (recent + [(now, text)])[-5:]
+
+    def is_echo(self, device_id, text):
+        """The phone's clipboard sending back what this computer just sent it."""
+        now = time.monotonic()
+        with self.lock:
+            return any(now - when < ECHO_SECONDS and old.strip() == text.strip()
+                       for when, old in self.sent_texts.get(device_id, []))
+
+    def on_battery(self, link, body):
+        charge = body.get("currentCharge")
+        if not isinstance(charge, int) or isinstance(charge, bool) or not 0 <= charge <= 100:
+            return
+        battery = (charge, body.get("isCharging") is True)
+        if battery != link.battery:
+            link.battery = battery
+            signal_panel()
+
+    # -- pairing
+    def on_pair(self, link, body):
+        if body.get("pair") is True:
+            if link.paired:
+                # The phone forgot us and asks again: the old pairing is gone.
+                self.unpair(link)
+            timestamp = body.get("timestamp")
+            with self.lock:
+                session = self.pairing
+            if (session is None or not isinstance(timestamp, int)
+                    or abs(timestamp - time.time()) > PAIR_CLOCK_SECONDS):
+                link.send("kdeconnect.pair", {"pair": False})
+                return
+            session.requests.put((link, timestamp))
+        elif body.get("pair") is False and link.paired:
+            self.unpair(link)
+
+    def unpair(self, link):
+        forget_device(link.id)
+        with self.lock:
+            link.paired = False
+            link.reader.limit = MAX_IDENTITY
+            if not link.counted:
+                link.counted = True
+                self.unpaired += 1
+        signal_panel()
+
+    def accept_pairing(self, link):
+        link.send("kdeconnect.pair", {"pair": True})
+        trust_device(link.id, link.name, link.der)
+        with self.lock:
+            link.paired = True
+            link.reader.limit = MAX_PACKET
+            if link.counted:
+                link.counted = False
+                self.unpaired -= 1
+        # From now on it listens on this network without `pair`.
+        active = self.networks() or []
+        added = tuple(dict.fromkeys(self.settings.networks + tuple(active)))
+        if added != self.settings.networks:
+            self.settings = save_settings(networks=added)
+        self.recheck()
+        signal_panel()
+
+    def pair_session(self, conn):
+        with self.lock:
+            if self.pairing is not None:
+                reply(conn, {"error": "another pairing is waiting"})
+                return
+            session = self.pairing = PairSession()
+        self.wake()
+        try:
+            reply(conn, {"event": "waiting", "name": self.name(), "firewall": firewall_on()})
+            while True:
+                remaining = session.deadline - time.monotonic()
+                if remaining <= 0:
+                    reply(conn, {"event": "timeout"})
+                    return
+                try:
+                    link, timestamp = session.requests.get(timeout=min(remaining, 1))
+                except queue.Empty:
+                    if gone(conn):
+                        return          # `pair` was cancelled: close the window now
+                    continue
+                key = verification_key(self.identity.der, link.der, timestamp)
+                reply(conn, {"event": "request", "id": link.id, "name": link.name, "key": key})
+                answer = read_json(conn, PAIR_ANSWER_SECONDS)
+                if answer.get("answer") == "yes":
+                    try:
+                        self.accept_pairing(link)
+                    except OSError:
+                        reply(conn, {"event": "failed"})
+                        return
+                    reply(conn, {"event": "paired", "id": link.id, "name": link.name})
+                else:
+                    with contextlib.suppress(OSError):
+                        link.send("kdeconnect.pair", {"pair": False})
+                    reply(conn, {"event": "refused"})
+                return
+        finally:
+            with self.lock:
+                self.pairing = None
+            self.wake()
+
+    # -- things the phone sends
+    def on_share(self, link, data):
+        body = data.get("body", {})
+        if isinstance(body.get("url"), str):
+            url = clean_address(body["url"])
+            if web_address(url):
+                add_received("page", link.name, url)
+                notify(f"Page from {link.name}", short_address(url), "Open", lambda: spawn(["xdg-open", url]))
+                return
+            body = {"text": url}
+        if isinstance(body.get("text"), str):
+            text = body["text"]
+            add_received("text", link.name, text)
+            notify(f"Text from {link.name}", text[:200], "Copy", lambda: copy_text(text))
+        elif isinstance(body.get("filename"), str):
+            threading.Thread(target=self.receive_file, args=(link, data), daemon=True).start()
+
+    def receive_file(self, link, data):
+        name = clean_filename(data["body"]["filename"])
+        size, port = data.get("payloadSize"), data.get("payloadTransferInfo", {}).get("port")
+        if not isinstance(size, int) or size < 0 or not isinstance(port, int) or not 1 <= port <= 65535:
+            return
+        folder = downloads_dir()
+        try:
+            os.makedirs(folder, exist_ok=True)
+            if shutil.disk_usage(folder).free - size < FREE_MARGIN:
+                notify(f"{name} from {link.name} wasn't saved", "There isn't enough free space.")
+                return
+            part = os.path.join(folder, f".{name}.{uuid.uuid4().hex[:8]}.part")
+            with socket.create_connection((link.address, port), timeout=TRANSFER_SECONDS) as raw:
+                with client_context(self.identity).wrap_socket(raw, server_side=False) as tls:
+                    if tls.getpeercert(binary_form=True) != link.der:
+                        raise ProtocolError("another certificate on the file connection")
+                    got = 0
+                    with open(part, "xb") as f:
+                        while got < size:
+                            chunk = tls.recv(min(65536, size - got))
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            got += len(chunk)
+            if got != size:
+                raise ProtocolError(f"{got} of {size} bytes")
+            path = free_name(folder, name)
+            os.link(part, path)             # fails instead of overwriting
+            os.unlink(part)
+        except (OSError, ProtocolError, ssl.SSLError) as error:
+            with contextlib.suppress(OSError, UnboundLocalError):
+                os.unlink(part)
+            warn(f"receiving {name} from {link.name}: {error}")
+            notify(f"{name} from {link.name} wasn't saved", "The transfer broke off.")
+            return
+        add_received("file", link.name, path)
+        if openable(path):
+            notify(f"{os.path.basename(path)} from {link.name}", "Saved in Downloads.", "Open",
+                   lambda: spawn(["xdg-open", path]))
+        else:
+            notify(f"{os.path.basename(path)} from {link.name}", "Saved in Downloads.", "Show in Folder",
+                   lambda: spawn(["xdg-open", folder]))
+
+    # -- things we send
+    def pick_link(self, device_id):
+        with self.lock:
+            paired = [link for link in self.links.values() if link.paired]
+        if device_id:
+            for link in paired:
+                if link.id == device_id:
+                    return link
+            raise PhoneError("that phone isn't connected")
+        if not paired:
+            raise PhoneError("no phone is connected")
+        if len(paired) > 1:
+            raise PhoneError("more than one phone is connected; choose one with --to")
+        return paired[0]
+
+    def send_items(self, device_id, items):
+        link = self.pick_link(device_id)
+        for item in items:
+            kind, value = item.get("kind"), item.get("value")
+            if kind in ("url", "text", "clipboard"):
+                self.remember_sent(link.id, value)
+            if kind == "url":
+                link.send("kdeconnect.share.request", {"url": value})
+            elif kind == "text":
+                link.send("kdeconnect.share.request", {"text": value})
+            elif kind == "clipboard":
+                link.send("kdeconnect.clipboard", {"content": value})
+            elif kind == "file":
+                error = self.send_file(link, value)
+                if error:
+                    # Once more (phase 0 saw one transfer break off and the next work).
+                    warn(f"sending {value}: {error}; trying again")
+                    error = self.send_file(link, value)
+                if error:
+                    raise PhoneError(f"{os.path.basename(value)}: {error}")
+        return link.name
+
+    def send_file(self, link, path):
+        """Offer a file on a payload port until the phone fetches it. None, or
+        what went wrong. The phone is the TLS client there, and only its
+        pinned certificate is accepted."""
+        try:
+            size = os.path.getsize(path)
+            stat = os.stat(path)
+            source = open(path, "rb")
+        except OSError as error:
+            return str(error)
+        with source:
+            server = None
+            for port in self.payload_ports:
+                candidate = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                try:
+                    candidate.bind((self.bind, port))
+                except OSError:
+                    candidate.close()
+                    continue
+                server = candidate
+                break
+            if server is None:
+                return "no free port to offer it on"
+            with server:
+                server.listen(1)
+                server.settimeout(OFFER_SECONDS)
+                link.send("kdeconnect.share.request",
+                          {"filename": os.path.basename(path), "creationTime": int(stat.st_mtime * 1000),
+                           "lastModified": int(stat.st_mtime * 1000), "open": False,
+                           "numberOfFiles": 1, "totalPayloadSize": size},
+                          payloadSize=size, payloadTransferInfo={"port": server.getsockname()[1]})
+                try:
+                    conn, _ = server.accept()
+                except TimeoutError:
+                    return "the phone didn't fetch it (is the firewall blocking ports 1739-1764?)"
+                except OSError as error:
+                    return str(error)
+                try:
+                    conn.settimeout(TRANSFER_SECONDS)
+                    with pinned_server_context(self.identity, link.der).wrap_socket(conn, server_side=True) as tls:
+                        while chunk := source.read(65536):
+                            tls.sendall(chunk)
+                except (OSError, ssl.SSLError) as error:
+                    return str(error) or type(error).__name__
+                finally:
+                    conn.close()
+        return None
+
+    # -- the control socket (one thread per request)
+    def serve_control(self, conn):
+        with conn:
+            try:
+                request = read_json(conn, 10)
+                command = request.get("command")
+                if command == "pair":
+                    self.pair_session(conn)
+                elif command == "status":
+                    reply(conn, self.status())
+                elif command == "send":
+                    name = self.send_items(request.get("to"), request.get("items", []))
+                    reply(conn, {"ok": True, "name": name})
+                elif command == "ring":
+                    link = self.pick_link(request.get("to"))
+                    link.send("kdeconnect.findmyphone.request", {})
+                    reply(conn, {"ok": True, "name": link.name})
+                elif command == "ping":                       # SPIKE: Q4 reminder
+                    link = self.pick_link(request.get("to"))
+                    text = request.get("text")
+                    link.send("kdeconnect.ping", {"message": text} if text else {})
+                    reply(conn, {"ok": True, "name": link.name})
+                elif command == "forget":
+                    reply(conn, {"ok": True, "name": self.forget(request.get("id", ""))})
+                elif command == "reload":
+                    self.settings = load_settings()
+                    self.recheck()
+                    reply(conn, {"ok": True})
+                elif command == "stop":
+                    reply(conn, {"ok": True})
+                    self.stopping.set()
+                    self.wake()
+                else:
+                    reply(conn, {"error": f"unknown command {command!r}"})
+            except PhoneError as error:
+                with contextlib.suppress(OSError):
+                    reply(conn, {"error": str(error)})
+            except (OSError, ValueError):
+                pass
+
+    def status(self):
+        with self.lock:
+            links = [{"id": link.id, "name": link.name, "paired": link.paired,
+                      "battery": list(link.battery) if link.battery else None} for link in self.links.values()]
+            return {"running": True, "listening": self.tcp is not None, "network": self.allowed,
+                    "pairing": self.pairing is not None, "connected": links, "name": self.name()}
+
+    def forget(self, device_id):
+        with self.lock:
+            link = self.links.get(device_id)
+        if link is not None and link.paired:
+            with contextlib.suppress(OSError):
+                link.send("kdeconnect.pair", {"pair": False})
+            self.unpair(link)
+            return link.name
+        name = forget_device(device_id)
+        if name is None:
+            raise PhoneError("no paired phone has that id")
+        return name
+
+
+def gone(conn):
+    """Whether the other end of a control connection has closed it."""
+    try:
+        readable, _, _ = select.select([conn], [], [], 0)
+        return bool(readable) and conn.recv(1, socket.MSG_PEEK) == b""
+    except (OSError, ValueError):       # closed here (a descriptor of -1)
+        return True
+
+
+def reply(conn, data):
+    conn.sendall((json.dumps(data, ensure_ascii=False) + "\n").encode())
+
+
+def read_json(conn, timeout):
+    conn.settimeout(timeout)
+    data = b""
+    while b"\n" not in data:
+        if len(data) > 1 << 20:
+            raise ValueError("request too long")
+        chunk = conn.recv(65536)
+        if not chunk:
+            raise ValueError("no request")
+        data += chunk
+    value = json.loads(data.split(b"\n", 1)[0])
+    if not isinstance(value, dict):
+        raise ValueError("not an object")
+    return value
+
+
+# --- Running the daemon --------------------------------------------------------------
+
+def daemon_lock():
+    os.makedirs(runtime_dir(), mode=0o700, exist_ok=True)
+    lock = open(os.path.join(runtime_dir(), "daemon.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        return None
+    return lock
+
+
+def session_socket():
+    """A connection to the compositor that closes when the session ends."""
+    display = os.environ.get("WAYLAND_DISPLAY")
+    if not display:
+        return None
+    path = display if os.path.isabs(display) else os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), display)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.connect(path)
+    except OSError:
+        sock.close()
+        return None
+    return sock
+
+
+def network_monitor():
+    try:
+        return subprocess.Popen(["nmcli", "monitor"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True, bufsize=1)
+    except OSError:
+        return None
+
+
+def run_daemon():
+    """For the session, while the feature is on. One per session."""
+    if live_session() or not load_settings().enabled:
+        return 0
+    lock = daemon_lock()
+    if lock is None:
+        return 0
+    with lock:
+        identity = ensure_identity()
+        path = control_path()
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(path)
+        control = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        control.bind(path)
+        os.chmod(path, 0o600)
+        control.listen(8)
+        daemon = Daemon(identity, load_settings())
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signal.signal(signum, lambda *_: (daemon.stopping.set(), daemon.wake()))
+        monitor = network_monitor()
+        make_on_link(os.path.realpath(sys.argv[0]))
+        signal_panel()                  # the button says it's waiting, not "not running"
+        try:
+            return daemon.run(control, session_socket(), monitor)
+        finally:
+            remove_on_link()
+            signal_panel()
+            if monitor is not None:
+                monitor.kill()
+                monitor.wait()
+            control.close()
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(path)
+
+
+def remove_runtime_dir(wait=5.0):
+    """After the daemon has stopped (it holds its lock until then)."""
+    with contextlib.suppress(PhoneError):
+        deadline = time.monotonic() + wait
+        while True:
+            lock = daemon_lock()
+            if lock is not None:
+                lock.close()
+                shutil.rmtree(runtime_dir(), ignore_errors=True)
+                return
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(0.1)
+
+
+def start_daemon():
+    if not os.environ.get("WAYLAND_DISPLAY"):
+        return
+    spawn([sys.executable, os.path.abspath(sys.argv[0]), "daemon"])
+
+
+# --- Commands --------------------------------------------------------------------------
+
+def request(data, timeout=OFFER_SECONDS * 2 + 30):
+    """Ask the daemon. Its answer, or None if it isn't running."""
+    try:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.connect(control_path())
+    except (OSError, PhoneError):
+        return None
+    with conn:
+        reply(conn, data)
+        answer = read_json(conn, timeout)
+    if "error" in answer:
+        raise PhoneError(answer["error"])
+    return answer
+
+
+def cmd_daemon(opts):
+    return run_daemon()
+
+
+def cmd_get(opts):
+    settings = load_settings()
+    if opts.key == "name":
+        print(device_name(settings))
+    else:
+        print(setting_text(settings, opts.key))
+    return 0
+
+
+def cmd_set(opts):
+    key, value = opts.key, opts.value
+    if key == "enabled":
+        was = load_settings().enabled
+        if value == DEFAULT_CHOICE:
+            on = system_settings().enabled
+            save_settings(enabled=None)
+        elif value in ("yes", "no"):
+            on = value == "yes"
+            if on and live_session():
+                raise PhoneError("not available in the live session")
+            save_settings(enabled=on)
+        else:
+            raise PhoneError("enabled: yes, no or default")
+        if on:
+            ensure_identity()
+            if request({"command": "status"}) is None:
+                start_daemon()
+        else:
+            with contextlib.suppress(PhoneError, OSError, ValueError):
+                request({"command": "stop"}, timeout=10)
+            shutil.rmtree(state_dir(), ignore_errors=True)
+            remove_runtime_dir()
+            remove_on_link()            # left by a daemon that didn't get to remove it
+        if on != was:
+            reload_panel()              # the phone button comes or goes
+    elif key == "name":
+        if value == DEFAULT_CHOICE:
+            save_settings(name=None)
+        elif clean_name(value):
+            save_settings(name=clean_name(value))
+        else:
+            raise PhoneError("name: some letters or digits, or default")
+        with contextlib.suppress(PhoneError, OSError, ValueError):
+            request({"command": "reload"}, timeout=10)
+    elif key == "networks":
+        # NetworkManager connection UUIDs, separated by spaces; "" for none.
+        networks = tuple(dict.fromkeys(value.split()))
+        if value == DEFAULT_CHOICE:
+            save_settings(networks=None)
+        elif all(re.fullmatch(r"[0-9A-Za-z-]{1,64}", n) for n in networks):
+            save_settings(networks=networks)
+        else:
+            raise PhoneError("networks: NetworkManager connection UUIDs, or default")
+        with contextlib.suppress(PhoneError, OSError, ValueError):
+            request({"command": "reload"}, timeout=10)
+    return 0
+
+
+def panel_status():
+    """The panel button: connected, or dimmed while no phone is."""
+    if not load_settings().enabled:
+        return {"text": ""}             # waybar hides a module without text
+    try:
+        status = request({"command": "status"}, timeout=5)
+    except (PhoneError, OSError, ValueError):
+        status = None
+    connected = [link for link in (status or {}).get("connected", []) if link["paired"]]
+    if connected:
+        state, text = "connected", "Connected to " + ", ".join(
+            link["name"] + battery_text(link.get("battery")) for link in connected)
+    elif status:
+        state, text = "waiting", "No phone connected"
+    else:
+        state, text = "waiting", "The phone connection isn't running"
+    return {"text": " ", "alt": state, "class": [state],
+            "tooltip": f"{text}\nClick: send the clipboard, what came from the phone, settings"}
+
+
+def battery_text(battery):
+    """ · 80 %, charging: a phone's battery for the tooltip, or nothing."""
+    if not battery:
+        return ""
+    charge, charging = battery
+    return f" · {charge} %" + (", charging" if charging else "")
+
+
+def menu_entries(connected, received, control, screenshot=True):
+    """(label, action) for the button's menu: action is ("send-files",),
+    ("send-text",), ("send-clipboard",), ("send-screenshot",), ("ring",),
+    ("run", ARGV) or ("copy", TEXT)."""
+    entries = []
+    if connected:
+        entries.append(("Send Files to Phone…", ("send-files",)))
+        entries.append(("Send Text to Phone…", ("send-text",)))
+        entries.append(("Send Clipboard to Phone", ("send-clipboard",)))
+        if screenshot:              # grim is only a Recommends of flickos-desktop
+            entries.append(("Send Screenshot to Phone", ("send-screenshot",)))
+        entries.append(("Ring My Phone", ("ring",)))
+    for item in reversed(received[-MENU_RECEIVED:]):
+        kind, value = item.get("kind"), item.get("value", "")
+        if kind == "page":
+            entries.append((f"Open {short_address(value)}", ("run", ["xdg-open", value])))
+        elif kind == "file" and os.path.isfile(value):
+            if openable(value):
+                entries.append((f"Open {os.path.basename(value)}", ("run", ["xdg-open", value])))
+            else:
+                entries.append((f"Show {os.path.basename(value)} in Folder",
+                                ("run", ["xdg-open", os.path.dirname(value)])))
+        elif kind in ("text", "clipboard") and value.strip():
+            first = value.strip().splitlines()[0]
+            first = first if len(first) <= 50 else first[:49] + "…"
+            entries.append((f"Copy \u201c{first}\u201d", ("copy", value)))
+    if control:
+        entries.append(("Phone Settings", ("run", ["flickos-control", "--page", "phone"])))
+    return entries
+
+
+def cmd_menu(opts):
+    """The panel button's menu, with fuzzel."""
+    if shutil.which("fuzzel") is None:
+        raise PhoneError("fuzzel is not installed")
+    try:
+        status = request({"command": "status"}, timeout=5) or {}
+    except (PhoneError, OSError, ValueError):
+        status = {}
+    connected = [link["name"] for link in status.get("connected", []) if link["paired"]]
+    entries = menu_entries(connected, read_received(), shutil.which("flickos-control") is not None,
+                           shutil.which("grim") is not None)
+    if not entries:
+        return 0
+    prompt = f"{connected[0]}: " if len(connected) == 1 else "Phone: "
+    # --index: fuzzel answers with the entry's number (flick-tiler's menu does the same).
+    result = subprocess.run(["fuzzel", "--dmenu", "--index", "--prompt", prompt, "--lines", str(len(entries))],
+                            input="\n".join(label.replace("\n", " ") for label, _ in entries) + "\n",
+                            capture_output=True, text=True, check=False)
+    try:
+        index = int(result.stdout.strip())
+    except ValueError:
+        return 0                        # nothing chosen
+    if not 0 <= index < len(entries):
+        return 0
+    action = entries[index][1]
+    sends = {"send-files": "choose", "send-text": "type_text", "send-clipboard": "clipboard",
+             "send-screenshot": "screenshot"}
+    if action[0] in sends:
+        what = {flag: flag == sends[action[0]] for flag in sends.values()}
+        return cmd_send(argparse.Namespace(things=[], to=None, text=None, notify=True, **what))
+    if action[0] == "ring":
+        return cmd_ring(argparse.Namespace(to=None, notify=True))
+    if action[0] == "copy":
+        copy_text(action[1])
+    else:
+        spawn(action[1])
+    return 0
+
+
+def cmd_status(opts):
+    if opts.panel:
+        print(json.dumps(panel_status(), ensure_ascii=False), flush=True)
+        return 0
+    settings = load_settings()
+    try:
+        answer = request({"command": "status"}, timeout=10)
+    except (OSError, ValueError):
+        answer = None
+    data = answer or {"running": False, "listening": False, "connected": []}
+    data.update({"enabled": settings.enabled, "name": device_name(settings), "firewall": firewall_on(),
+                 "paired": len(load_devices())})
+    if opts.json:
+        print(json.dumps(data, ensure_ascii=False))
+        return 0
+    print(f"Phone connection: {'on' if settings.enabled else 'off'}"
+          + ("" if not settings.enabled or data["running"] else " (not running)"))
+    print(f"This computer's name on the phone: {data['name']}")
+    if settings.enabled:
+        print(f"Listening: {'yes' if data['listening'] else 'no (not on a network where a phone was paired)'}")
+        for link in data["connected"]:
+            print(f"Connected: {link['name']}{'' if link['paired'] else ' (not paired)'}")
+        if data["firewall"]:
+            print("The firewall is on: phones can connect only if it lets them (TCP 1716 and 1739-1764).")
+    return 0
+
+
+def cmd_state(opts):
+    """Everything the Settings page shows, as one JSON object."""
+    settings = load_settings()
+    try:
+        status = request({"command": "status"}, timeout=10) or {}
+    except (PhoneError, OSError, ValueError):
+        status = {}
+    connected = {link["id"] for link in status.get("connected", []) if link["paired"]}
+    active = active_networks() or []
+    names = network_names() if settings.networks or active else {}
+    data = {
+        "enabled": settings.enabled, "running": bool(status.get("running")),
+        "listening": bool(status.get("listening")), "pairing": bool(status.get("pairing")),
+        "name": device_name(settings), "own_name": settings.name, "computer_name": computer_name(),
+        "firewall": firewall_on(), "live": live_session(),
+        # Not running because something else has KDE Connect's port.
+        "blocked": settings.enabled and not status.get("running") and port_taken(),
+        "phones": [{"id": key, "name": value.get("name", ""), "paired": value.get("paired", ""),
+                    "connected": key in connected} for key, value in load_devices().items()],
+        "networks": [{"uuid": uuid_, "name": names.get(uuid_, ""), "active": uuid_ in active}
+                     for uuid_ in settings.networks],
+        "active": [{"uuid": uuid_, "name": names.get(uuid_, "")} for uuid_ in active],
+        "received": [received_details(item) for item in read_received()],
+    }
+    print(json.dumps(data, ensure_ascii=False))
+    return 0
+
+
+def port_taken(port=TCP_PORT):
+    """Whether another program (KDE Connect, GSConnect) listens on the port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("", port))
+        except OSError:
+            return True
+    return False
+
+
+def received_details(item):
+    """What the page may do with an item: open a file that is still there
+    and is a document, picture, sound or video; open an address in a text."""
+    item = dict(item)
+    if item.get("kind") == "file":
+        item["exists"] = os.path.isfile(item.get("value", ""))
+        item["openable"] = item["exists"] and openable(item["value"])
+    elif item.get("kind") in ("text", "clipboard"):
+        found = URL_IN_TEXT.search(item.get("value", ""))
+        item["address"] = found.group(0) if found else ""
+    return item
+
+
+def cmd_devices(opts):
+    devices = load_devices()
+    try:
+        answer = request({"command": "status"}, timeout=10)
+    except (OSError, ValueError):
+        answer = None
+    connected = {link["id"] for link in (answer or {}).get("connected", []) if link["paired"]}
+    rows = [{"id": key, "name": value.get("name", ""), "paired": value.get("paired", ""),
+             "connected": key in connected} for key, value in devices.items()]
+    if opts.json:
+        print(json.dumps(rows, ensure_ascii=False))
+    for row in [] if opts.json else rows:
+        print(f"{row['name']}\t{row['id']}\t{'connected' if row['connected'] else 'not connected'}")
+    return 0
+
+
+def cmd_forget(opts):
+    answer = request({"command": "forget", "id": opts.id}, timeout=10)
+    name = answer["name"] if answer else forget_device(opts.id)
+    if name is None:
+        raise PhoneError("no paired phone has that id")
+    print(f"Forgot {name}.")
+    return 0
+
+
+def cmd_pair(opts):
+    """Wait for a phone to ask, show its key, answer. With --json: one JSON
+    event per line (waiting, request, paired, refused, failed, timeout), and
+    the answer, yes or no, is read as a line from standard input."""
+    say = print_event if opts.json else None
+    if not load_settings().enabled:
+        raise PhoneError("the phone connection is off (flickos-phone set enabled yes)")
+    try:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.connect(control_path())
+    except OSError:
+        raise PhoneError("the phone connection isn't running") from None
+    with conn:
+        reply(conn, {"command": "pair"})
+        event = read_json(conn, 10)
+        if "error" in event:
+            raise PhoneError(event["error"])
+        if say:
+            say(event)
+        else:
+            print(f'In the KDE Connect app on the phone, choose "{event["name"]}" and tap Pair.')
+            if event.get("firewall"):
+                print("The firewall is on: the phone can only connect if it lets phones in\n"
+                      "(Settings > Phone, or flickos-control system firewall.phones on).")
+            print(f"Waiting {PAIR_SECONDS // 60} minutes...")
+        event = read_json(conn, PAIR_SECONDS + 30)
+        if event.get("event") != "request":
+            if say:
+                say(event)
+                return 1
+            raise PhoneError("no phone asked to pair")
+        if say:
+            say(event)
+            answer = sys.stdin.readline().strip().lower()
+        else:
+            print(f"{event['name']} asks to pair. Verification key: {event['key']}")
+            answer = input("Does the phone show the same key? [y/N] ").strip().lower()
+        reply(conn, {"answer": "yes" if answer in ("y", "yes") else "no"})
+        event = read_json(conn, 10)
+    if say:
+        say(event)
+        return 0 if event.get("event") == "paired" else 1
+    if event.get("event") != "paired":
+        raise PhoneError("not paired")
+    print(f"Paired with {event['name']}.")
+    return 0
+
+
+def print_event(event):
+    print(json.dumps(event, ensure_ascii=False), flush=True)
+
+
+def cmd_send(opts):
+    """Send to the phone. --notify (the file manager's Send to Phone, which
+    shows no output, and is there even while the phone connection is off):
+    say so with a notification while sending and after."""
+    note = None
+    shot = None
+    try:
+        items = []
+        if opts.choose:
+            chosen = choose_files()
+            if not chosen:
+                return 0                # cancelled
+            items.extend({"kind": "file", "value": path} for path in chosen)
+        if opts.type_text:
+            typed = type_text()
+            if not typed:
+                return 0                # cancelled
+            items.append({"kind": "text", "value": typed})
+        if opts.screenshot:
+            shot = take_screenshot()
+            items.append({"kind": "file", "value": shot})
+        if opts.clipboard:
+            # A web address goes as a page, so the phone offers to open it.
+            text = clipboard_text()
+            address = text.strip()
+            if "\n" not in address and web_address(address):
+                items.append({"kind": "url", "value": address})
+            else:
+                items.append({"kind": "clipboard", "value": text})
+        if opts.text is not None:
+            items.append({"kind": "text", "value": opts.text})
+        for thing in opts.things:
+            if re.match(r"^[a-z][a-z0-9+.-]*://", thing, re.I):
+                items.append({"kind": "url", "value": thing})
+            elif os.path.isfile(thing):
+                items.append({"kind": "file", "value": os.path.abspath(thing)})
+            else:
+                raise PhoneError(f"{thing}: not a file or an address")
+        if not items:
+            raise PhoneError("nothing to send")
+        if opts.notify:
+            note = progress_note("Sending to your phone…", sent_names(items))
+        answer = request({"command": "send", "to": opts.to, "items": items})
+        if answer is None:
+            raise PhoneError(not_running_reason())
+    except (PhoneError, OSError, ValueError) as error:
+        if opts.notify:
+            progress_note("Not sent to your phone", f"{str(error)[:1].upper()}{str(error)[1:]}.", note)
+        raise
+    finally:
+        if shot:
+            with contextlib.suppress(OSError):
+                os.unlink(shot)
+    print(f"Sent to {answer['name']}.")
+    if opts.notify:
+        progress_note(f"Sent to {answer['name']}", sent_names(items), note)
+    return 0
+
+
+def not_running_reason():
+    """Why the daemon didn't answer, in words for a notification."""
+    if live_session():
+        return "phones can't connect in the live session"
+    if not load_settings().enabled:
+        return "the phone connection is off: turn it on in Settings > Phone"
+    return "the phone connection isn't running"
+
+
+def choose_files():
+    """The files picked in GTK's file chooser; [] when it's cancelled. GTK is
+    imported only here, so nothing else in this program needs it."""
+    try:
+        import gi
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk
+    except (ImportError, ValueError) as error:
+        raise PhoneError(f"the file chooser needs GTK 3: {error}") from None
+    dialog = Gtk.FileChooserDialog(title="Send Files to Phone", action=Gtk.FileChooserAction.OPEN)
+    dialog.add_buttons("_Cancel", Gtk.ResponseType.CANCEL, "_Send", Gtk.ResponseType.ACCEPT)
+    dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+    dialog.set_select_multiple(True)
+    dialog.set_local_only(True)
+    try:
+        if dialog.run() != Gtk.ResponseType.ACCEPT:
+            return []
+        return [path for path in dialog.get_filenames() if os.path.isfile(path)]
+    finally:
+        dialog.destroy()
+        while Gtk.events_pending():         # let the window go before sending
+            Gtk.main_iteration()
+
+
+def type_text():
+    """A line typed into fuzzel (a box like the menu's, without a list);
+    "" when it's cancelled."""
+    if shutil.which("fuzzel") is None:
+        raise PhoneError("fuzzel is not installed")
+    result = subprocess.run(["fuzzel", "--dmenu", "--prompt-only", "Text to send: "],
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def take_screenshot():
+    """The whole screen as a PNG in the runtime folder (deleted after sending)."""
+    if shutil.which("grim") is None:
+        raise PhoneError("grim is not installed")
+    # The menu that asked for it has just closed: let it leave the screen.
+    time.sleep(SCREENSHOT_DELAY)
+    folder = runtime_dir()
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    path = os.path.join(folder, datetime.datetime.now().strftime("Screenshot %Y-%m-%d %H-%M-%S.png"))
+    try:
+        result = subprocess.run(["grim", path], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise PhoneError(f"grim: {error}") from None
+    if result.returncode != 0 or not os.path.isfile(path):
+        raise PhoneError(f"the screenshot failed: {result.stderr.strip() or 'grim gave nothing'}")
+    return path
+
+
+def cmd_ping(opts):
+    """SPIKE: send a ping with TEXT; the phone shows it as a notification."""
+    answer = request({"command": "ping", "to": opts.to, "text": opts.text}, timeout=10)
+    if answer is None:
+        raise PhoneError("the phone connection isn't running")
+    print(f"pinged {answer['name']}")
+
+
+def cmd_stop(opts):
+    """SPIKE: stop the running daemon (installed or this copy), keep its state."""
+    answer = request({"command": "stop"}, timeout=10)
+    print("stopped" if answer else "no daemon was running")
+
+
+def cmd_ring(opts):
+    """Ring the phone, even when it's silenced, until it's picked up."""
+    try:
+        answer = request({"command": "ring", "to": opts.to}, timeout=10)
+        if answer is None:
+            raise PhoneError("the phone connection isn't running")
+    except (PhoneError, OSError, ValueError) as error:
+        if opts.notify:
+            progress_note("Your phone can't ring", f"{str(error)[:1].upper()}{str(error)[1:]}.")
+        raise PhoneError(str(error)) from None
+    print(f"{answer['name']} is ringing.")
+    if opts.notify:
+        progress_note(f"{answer['name']} is ringing", "Tap it on the phone to stop it.")
+    return 0
+
+
+def sent_names(items):
+    names = [os.path.basename(i["value"]) if i["kind"] == "file" else
+             "the clipboard" if i["kind"] == "clipboard" else i["value"][:60] for i in items]
+    return ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+
+
+def progress_note(title, body, replace=None):
+    """A notification that replaces the one with id replace; its id."""
+    argv = ["notify-send", "--app-name=Phone", "--icon=phone", "--print-id", title, body]
+    if replace:
+        argv.insert(1, f"--replace-id={replace}")
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return replace
+    return result.stdout.strip() or replace
+
+
+def cmd_received(opts):
+    items = read_received()
+    if opts.json:
+        print(json.dumps(items, ensure_ascii=False))
+        return 0
+    for item in items:
+        when = datetime.datetime.fromtimestamp(item["time"]).strftime("%Y-%m-%d %H:%M")
+        print(f"{when}\t{item['device']}\t{item['kind']}\t{item['value']}")
+    return 0
+
+
+def cmd_network(opts):
+    settings = load_settings()
+    if opts.action == "list":
+        names, active = network_names(), active_networks() or []
+        for uuid_ in settings.networks:
+            here = "\tthis network" if uuid_ in active else ""
+            print(f"{names.get(uuid_, '?')}\t{uuid_}{here}")
+        return 0
+    if opts.action == "add":
+        added = [opts.uuid] if opts.uuid else (active_networks() or [])
+        if not added:
+            raise PhoneError("not connected to a Wi-Fi or wired network")
+        networks = tuple(dict.fromkeys(settings.networks + tuple(added)))
+    else:
+        if not opts.uuid:
+            raise PhoneError("network remove UUID")
+        networks = tuple(n for n in settings.networks if n != opts.uuid)
+    save_settings(networks=networks)
+    with contextlib.suppress(PhoneError, OSError, ValueError):
+        request({"command": "reload"}, timeout=10)
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="flickos-phone",
+                                     description="Send pages, files and text between a phone and this computer.")
+    commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    commands.add_parser("daemon", help="the session daemon (autostart; only while on)").set_defaults(func=cmd_daemon)
+    get = commands.add_parser("get", help="print a setting: enabled, name, networks")
+    get.add_argument("key", choices=("enabled", "name", "networks"))
+    get.set_defaults(func=cmd_get)
+    set_ = commands.add_parser("set", help="enabled yes|no|default, name NAME|default, "
+                               "networks 'UUID ...'|default")
+    set_.add_argument("key", choices=("enabled", "name", "networks"))
+    set_.add_argument("value")
+    set_.set_defaults(func=cmd_set)
+    status = commands.add_parser("status", help="on or off, running, connected phones")
+    status.add_argument("--json", action="store_true")
+    status.add_argument("--panel", action="store_true", help="the panel button's JSON (waybar)")
+    commands.add_parser("menu", help="the panel button's menu (fuzzel)").set_defaults(func=cmd_menu)
+    ping = commands.add_parser("ping", help="SPIKE: a notification on the phone")
+    ping.add_argument("text", nargs="?")
+    ping.add_argument("--to", metavar="ID")
+    ping.set_defaults(func=cmd_ping)
+    commands.add_parser("stop", help="SPIKE: stop the daemon").set_defaults(func=cmd_stop)
+    ring = commands.add_parser("ring", help="ring the phone, even when it's silenced")
+    ring.add_argument("--to", metavar="ID", help="the phone, when more than one is connected")
+    ring.add_argument("--notify", action="store_true", help="say what happened in a notification")
+    ring.set_defaults(func=cmd_ring)
+    status.set_defaults(func=cmd_status)
+    devices = commands.add_parser("devices", help="paired phones: name, id, connected")
+    devices.add_argument("--json", action="store_true")
+    devices.set_defaults(func=cmd_devices)
+    pair = commands.add_parser("pair", help="let a phone pair: wait for it to ask, show its key")
+    pair.add_argument("--json", action="store_true", help="events as JSON lines, the answer on stdin")
+    pair.set_defaults(func=cmd_pair)
+    commands.add_parser("state", help="everything the Settings page shows, as JSON").set_defaults(func=cmd_state)
+    forget = commands.add_parser("forget", help="forget a paired phone")
+    forget.add_argument("id")
+    forget.set_defaults(func=cmd_forget)
+    send = commands.add_parser("send", help="send files or addresses to the phone")
+    send.add_argument("things", nargs="*", metavar="FILE|URL")
+    send.add_argument("--to", metavar="ID", help="the phone, when more than one is connected")
+    send.add_argument("--text", help="send this text")
+    send.add_argument("--clipboard", action="store_true",
+                      help="send the clipboard's text (a web address goes as a page)")
+    send.add_argument("--screenshot", action="store_true", help="send a screenshot of the whole screen")
+    send.add_argument("--choose", action="store_true", help="choose the files in a window")
+    send.add_argument("--type-text", action="store_true", help="type the text to send in a box")
+    send.add_argument("--notify", action="store_true", help="say what happened in a notification "
+                      "(the file manager's Send to Phone)")
+    send.set_defaults(func=cmd_send)
+    received = commands.add_parser("received", help="what came from a phone recently")
+    received.add_argument("--json", action="store_true")
+    received.set_defaults(func=cmd_received)
+    network = commands.add_parser("network", help="the networks where it listens: list, add [UUID], remove UUID")
+    network.add_argument("action", choices=("list", "add", "remove"))
+    network.add_argument("uuid", nargs="?")
+    network.set_defaults(func=cmd_network)
+    opts = parser.parse_args(argv)
+    try:
+        return opts.func(opts)
+    except (PhoneError, OSError, ValueError) as error:
+        warn(str(error))
+        return 1
+    except (KeyboardInterrupt, EOFError):
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

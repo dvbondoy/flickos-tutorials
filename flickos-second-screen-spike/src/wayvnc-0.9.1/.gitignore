@@ -1,0 +1,10 @@
+build
+subprojects
+*.swp
+.clang_complete
+.ycm_extra_conf.py
+perf.*
+*.pem
+.vimrc
+.cache
+sandbox

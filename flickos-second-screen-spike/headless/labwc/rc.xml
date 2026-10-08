@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<labwc_config>
+  <keyboard>
+    <keybind key="XF86Launch8"><action name="VirtualOutputAdd" output_name="HEADLESS-PHONE"/></keybind>
+    <keybind key="XF86Launch9"><action name="VirtualOutputRemove" output_name="HEADLESS-PHONE"/></keybind>
+  </keyboard>
+  <windowRules>
+    <!-- A window with this app id adds the phone's screen, then closes. -->
+    <windowRule identifier="flickos-second-screen-on">
+      <action name="VirtualOutputAdd" output_name="HEADLESS-PHONE"/>
+      <action name="Close"/>
+    </windowRule>
+    <windowRule identifier="flickos-second-screen-off">
+      <action name="VirtualOutputRemove" output_name="HEADLESS-PHONE"/>
+      <action name="Close"/>
+    </windowRule>
+  </windowRules>
+</labwc_config>

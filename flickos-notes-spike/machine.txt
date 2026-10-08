@@ -1,0 +1,40 @@
+
+== FlickOS and Debian
+  FlickOS 2.1 (based on Debian GNU/Linux 13 (trixie))
+  flickos-archive-keyring 1.5
+  flickos-branding 1.7
+  flickos-control 1.23
+  flickos-countme 1.2
+  flickos-desktop 1.27
+  flickos-greeter 1.1
+  flickos-layouts 1.36
+  flickos-menu 1.7
+  flickos-phone 1.8
+  flickos-phone-screen 0.2
+  flickos-screenshot 1.5
+  flickos-settings 1.34
+  flickos-shortcuts 1.13
+  flickos-welcome 1.4
+
+== Packages (installed version, or 'no')
+  python3-gi                       3.50.0-4+b1
+  gir1.2-gtk-3.0                   3.24.49-3
+  gir1.2-gtksource-4               4.8.4-6
+  libgtksourceview-4-0             4.8.4-6
+  flickos-phone                    1.8
+  adb                              1:34.0.5-12
+
+== Screens
+  HDMI-A-1
+    enabled:  yes
+    mode:     1920x1080 px, 60.000000
+    position: 1538,0
+    scale:    1.000000
+  eDP-1
+    enabled:  no
+
+== CPU, memory, graphics
+  4 CPUs: Intel(R) Core(TM) i3-4030U CPU @ 1.90GHz
+  memory: 11.6 GB
+  VGA compatible controller: Intel Corporation Haswell-ULT Integrated Graphics Controller (rev 0b)
+  3D controller: NVIDIA Corporation GF117M [GeForce 610M/710M/810M/820M / GT 620M/625M/630M/720M] (rev a1)

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<style-scheme id="flickos-notes" name="Notes" version="1.0">
+  <style name="def:heading" bold="true" scale="1.35"/>
+  <style name="def:strong-emphasis" bold="true"/>
+  <style name="def:emphasis" italic="true"/>
+  <style name="def:list-marker" foreground="#8a909a"/>
+  <style name="def:link-destination" foreground="#8a909a"/>
+  <style name="def:link-text" foreground="#5294e2"/>
+  <style name="flickos-notes:heading1" bold="true" scale="1.6"/>
+  <style name="flickos-notes:heading2" bold="true" scale="1.3"/>
+  <style name="flickos-notes:heading3" bold="true" scale="1.1"/>
+  <style name="flickos-notes:markup" foreground="#8a909a"/>
+  <style name="flickos-notes:tag" foreground="#5294e2"/>
+  <style name="flickos-notes:checkbox" foreground="#5294e2" bold="true"/>
+  <style name="flickos-notes:task-done" foreground="#8a909a" strikethrough="true"/>
+  <style name="flickos-notes:strong" bold="true"/>
+  <style name="flickos-notes:emphasis" italic="true"/>
+  <style name="flickos-notes:link" foreground="#5294e2" underline="single"/>
+</style-scheme>

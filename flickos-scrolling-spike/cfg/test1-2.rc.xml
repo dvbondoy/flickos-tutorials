@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<!-- Test 1: which regions labwc accepts, and where it puts windows snapped
+     to regions that reach past the screen's edges. -->
+<labwc_config>
+  <core><gap>0</gap></core>
+  <regions>
+    <region name="r_left" x="0%"   y="0%" width="50%"  height="100%" />
+    <region name="r_over" x="75%"  y="0%" width="50%"  height="100%" />
+    <region name="r_off"  x="100%" y="0%" width="50%"  height="100%" />
+    <region name="r_neg"  x="-25%" y="0%" width="50%"  height="100%" />
+    <region name="r_wide" x="0%"   y="0%" width="150%" height="100%" />
+  </regions>
+  <windowRules>
+    <windowRule identifier="a"><action name="SnapToRegion" region="r_left" /></windowRule>
+    <windowRule identifier="b"><action name="SnapToRegion" region="r_over" /></windowRule>
+    <windowRule identifier="c"><action name="SnapToRegion" region="r_off" /></windowRule>
+    <windowRule identifier="d"><action name="SnapToRegion" region="r_neg" /></windowRule>
+    <windowRule identifier="e"><action name="SnapToRegion" region="r_wide" /></windowRule>
+  </windowRules>
+  <!-- Test 2: move windows by pixels, past the left edge too. labwc has no
+       IPC, so a program would press one of these keys with a virtual
+       keyboard (here: wtype -k KEY). ForEach picks the window by its app id
+       or by the region it is tiled to. -->
+  <keyboard>
+    <keybind key="XF86Launch1"><action name="ForEach"><query identifier="a" /><then>
+      <action name="MoveTo" x="-300" y="0" /></then></action></keybind>
+    <keybind key="XF86Launch2"><action name="ForEach"><query tiled_region="r_over" /><then>
+      <action name="MoveRelative" x="-500" y="0" /></then></action></keybind>
+    <keybind key="XF86Launch3"><action name="ForEach"><query identifier="c" /><then>
+      <action name="MoveTo" x="-2000" y="0" /></then></action></keybind>
+    <keybind key="XF86Launch4"><action name="ForEach"><query identifier="a" /><then>
+      <action name="ResizeTo" width="2000" height="400" /></then></action></keybind>
+  </keyboard>
+</labwc_config>

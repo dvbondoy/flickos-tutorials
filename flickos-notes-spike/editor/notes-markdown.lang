@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Spike: a Markdown language for Notes, written from scratch (not a copy
+     of GtkSourceView's markdown.lang). Headings need a space after the #s,
+     so "#work" at the start of a line is a tag, as in CommonMark. -->
+<language id="flickos-notes" name="Notes" version="2.0" _section="Markup">
+  <metadata>
+    <property name="globs">*.md</property>
+  </metadata>
+
+  <styles>
+    <style id="heading1" name="Heading 1"/>
+    <style id="heading2" name="Heading 2"/>
+    <style id="heading3" name="Heading 3 to 6"/>
+    <style id="markup" name="Markup characters"/>
+    <style id="tag" name="Tag"/>
+    <style id="checkbox" name="Checkbox"/>
+    <style id="task-done" name="Ticked item"/>
+    <style id="code" name="Code"/>
+    <style id="strong" name="Bold"/>
+    <style id="emphasis" name="Italic"/>
+    <style id="link" name="Link"/>
+  </styles>
+
+  <definitions>
+    <context id="tag" style-ref="tag">
+      <match>(?&lt;![^ \t(])#\p{L}[\p{L}\p{N}_/-]*</match>
+    </context>
+
+    <context id="code-span" style-ref="code" class="code no-spell-check">
+      <match>`[^`\n]+`</match>
+    </context>
+
+    <context id="strong-stars">
+      <match>(\*\*)(?=[^\s*])(.+?)(?&lt;=[^\s*])(\*\*)</match>
+      <include>
+        <context sub-pattern="1" style-ref="markup"/>
+        <context sub-pattern="2" style-ref="strong"/>
+        <context sub-pattern="3" style-ref="markup"/>
+      </include>
+    </context>
+
+    <context id="strong-underscores">
+      <match>(__)(?=[^\s_])(.+?)(?&lt;=[^\s_])(__)</match>
+      <include>
+        <context sub-pattern="1" style-ref="markup"/>
+        <context sub-pattern="2" style-ref="strong"/>
+        <context sub-pattern="3" style-ref="markup"/>
+      </include>
+    </context>
+
+    <context id="emphasis-star">
+      <match>(?&lt;![*\w])(\*)(?=[^\s*])(.+?)(?&lt;=[^\s*])(\*)(?![*\w])</match>
+      <include>
+        <context sub-pattern="1" style-ref="markup"/>
+        <context sub-pattern="2" style-ref="emphasis"/>
+        <context sub-pattern="3" style-ref="markup"/>
+      </include>
+    </context>
+
+    <context id="emphasis-underscore">
+      <match>(?&lt;![_\w])(_)(?=[^\s_])(.+?)(?&lt;=[^\s_])(_)(?![_\w])</match>
+      <include>
+        <context sub-pattern="1" style-ref="markup"/>
+        <context sub-pattern="2" style-ref="emphasis"/>
+        <context sub-pattern="3" style-ref="markup"/>
+      </include>
+    </context>
+
+    <context id="link">
+      <match>(\[)([^\]\n]+)(\]\([^)\n]+\))</match>
+      <include>
+        <context sub-pattern="1" style-ref="markup"/>
+        <context sub-pattern="2" style-ref="link"/>
+        <context sub-pattern="3" style-ref="markup"/>
+      </include>
+    </context>
+
+    <context id="url" style-ref="link" class="no-spell-check">
+      <match>\bhttps?://[^\s)&gt;]+</match>
+    </context>
+
+    <context id="inline">
+      <include>
+        <context ref="code-span"/>
+        <context ref="link"/>
+        <context ref="url"/>
+        <context ref="strong-stars"/>
+        <context ref="strong-underscores"/>
+        <context ref="emphasis-star"/>
+        <context ref="emphasis-underscore"/>
+        <context ref="tag"/>
+      </include>
+    </context>
+
+    <context id="flickos-notes">
+      <include>
+        <context id="fence" style-ref="code" class="code no-spell-check">
+          <start>^[ ]{0,3}```.*$</start>
+          <end>^[ ]{0,3}```[ \t]*$</end>
+        </context>
+        <context id="heading1" end-at-line-end="true" style-ref="heading1">
+          <start>^(#)[ \t]+</start>
+          <include>
+            <context sub-pattern="1" where="start" style-ref="markup"/>
+            <context ref="inline"/>
+          </include>
+        </context>
+        <context id="heading2" end-at-line-end="true" style-ref="heading2">
+          <start>^(##)[ \t]+</start>
+          <include>
+            <context sub-pattern="1" where="start" style-ref="markup"/>
+            <context ref="inline"/>
+          </include>
+        </context>
+        <context id="heading3" end-at-line-end="true" style-ref="heading3">
+          <start>^(#{3,6})[ \t]+</start>
+          <include>
+            <context sub-pattern="1" where="start" style-ref="markup"/>
+            <context ref="inline"/>
+          </include>
+        </context>
+        <context id="task-done" end-at-line-end="true" style-ref="task-done">
+          <start>^([ \t]*(?:[-*+]|\d+[.)])[ \t]+)(\[[xX]\])</start>
+          <include>
+            <context sub-pattern="1" where="start" style-ref="markup"/>
+            <context sub-pattern="2" where="start" style-ref="checkbox"/>
+            <context ref="inline"/>
+          </include>
+        </context>
+        <context id="task-open">
+          <match>^([ \t]*(?:[-*+]|\d+[.)])[ \t]+)(\[ \])</match>
+          <include>
+            <context sub-pattern="1" style-ref="markup"/>
+            <context sub-pattern="2" style-ref="checkbox"/>
+          </include>
+        </context>
+        <context id="list-marker" style-ref="markup">
+          <match>^[ \t]*(?:[-*+]|\d+[.)])(?=[ \t])</match>
+        </context>
+        <context id="quote-marker" style-ref="markup">
+          <match>^[ ]{0,3}&gt;</match>
+        </context>
+        <context ref="inline"/>
+      </include>
+    </context>
+  </definitions>
+</language>
